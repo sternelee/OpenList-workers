@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/OpenListTeam/OpenList-workers/workers/models"
+	"github.com/sternelee/OpenList-workers/workers/models"
 	"github.com/syumai/workers/cloudflare"
 )
 

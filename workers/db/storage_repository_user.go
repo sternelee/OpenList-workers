@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 
-	"github.com/OpenListTeam/OpenList-workers/workers/models"
+	"github.com/sternelee/OpenList-workers/workers/models"
 )
 
 // GetByUserAndPath 根据用户ID和挂载路径获取存储配置

@@ -86,8 +86,8 @@
 
 ```go
 import (
-    "github.com/OpenListTeam/OpenList-workers/workers/db"
-    "github.com/OpenListTeam/OpenList-workers/workers/models"
+    "github.com/sternelee/OpenList-workers/workers/db"
+    "github.com/sternelee/OpenList-workers/workers/models"
 )
 
 // 创建仓库实例

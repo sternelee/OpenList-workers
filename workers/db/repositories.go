@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 
-	"github.com/OpenListTeam/OpenList-workers/workers/models"
+	"github.com/sternelee/OpenList-workers/workers/models"
 )
 
 // Repository 接口定义了基本的数据库操作

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/OpenListTeam/OpenList-workers/workers/models"
+	"github.com/sternelee/OpenList-workers/workers/models"
 )
 
 type searchNodeRepository struct {

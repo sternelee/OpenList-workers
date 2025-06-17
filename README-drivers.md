@@ -141,7 +141,7 @@ package mydrive
 
 import (
     "context"
-    "github.com/OpenListTeam/OpenList-workers/workers/drivers"
+    "github.com/sternelee/OpenList-workers/workers/drivers"
 )
 
 type MyDrive struct {
@@ -178,7 +178,7 @@ func init() {
 3. 导入驱动
 ```go
 // main.go
-import _ "github.com/OpenListTeam/OpenList-workers/workers/drivers/mydrive"
+import _ "github.com/sternelee/OpenList-workers/workers/drivers/mydrive"
 ```
 
 ### 数据库集成

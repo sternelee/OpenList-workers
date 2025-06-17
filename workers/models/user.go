@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/OpenListTeam/OpenList-workers/pkg/utils/random"
+	"github.com/sternelee/OpenList-workers/pkg/utils/random"
 )
 
 const (
