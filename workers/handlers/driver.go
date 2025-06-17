@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/OpenListTeam/OpenList-workers/workers/drivers"
-	"github.com/OpenListTeam/OpenList-workers/workers/models"
+	"github.com/sternelee/OpenList-workers/workers/drivers"
+	"github.com/sternelee/OpenList-workers/workers/models"
 )
 
 // DriverHandler 驱动处理器
@@ -28,26 +28,26 @@ func NewDriverHandler(driverService *drivers.DriverService) *DriverHandler {
 // ListDriverInfo 列出所有驱动信息
 func (h *DriverHandler) ListDriverInfo(w http.ResponseWriter, r *http.Request) {
 	driverInfos := drivers.GetDriverInfos()
-	
+
 	response := APIResponse{
 		Code:    200,
 		Message: "success",
 		Data:    driverInfos,
 	}
-	
+
 	writeJSONResponse(w, response)
 }
 
 // ListDriverNames 列出所有驱动名称
 func (h *DriverHandler) ListDriverNames(w http.ResponseWriter, r *http.Request) {
 	driverNames := drivers.GetDriverNames()
-	
+
 	response := APIResponse{
 		Code:    200,
 		Message: "success",
 		Data:    driverNames,
 	}
-	
+
 	writeJSONResponse(w, response)
 }
 
@@ -58,48 +58,48 @@ func (h *DriverHandler) GetDriverInfo(w http.ResponseWriter, r *http.Request) {
 		writeErrorResponse(w, 400, "driver parameter is required")
 		return
 	}
-	
+
 	driverInfo, err := drivers.GetDriverInfo(driverName)
 	if err != nil {
 		writeErrorResponse(w, 404, fmt.Sprintf("driver %s not found", driverName))
 		return
 	}
-	
+
 	response := APIResponse{
 		Code:    200,
 		Message: "success",
 		Data:    driverInfo,
 	}
-	
+
 	writeJSONResponse(w, response)
 }
 
 // ListFiles 列出文件
 func (h *DriverHandler) ListFiles(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	
+
 	// 获取路径参数
 	path := r.URL.Query().Get("path")
 	if path == "" {
 		path = "/"
 	}
-	
+
 	// 获取其他参数
 	refresh := r.URL.Query().Get("refresh") == "true"
-	
+
 	// 构建列表参数
 	args := drivers.ListArgs{
 		ReqPath: path,
 		Refresh: refresh,
 	}
-	
+
 	// 调用驱动服务
 	files, err := h.driverService.ListFiles(ctx, path, args)
 	if err != nil {
 		writeErrorResponse(w, 500, fmt.Sprintf("failed to list files: %v", err))
 		return
 	}
-	
+
 	// 转换为响应格式
 	var fileInfos []FileInfo
 	for _, file := range files {
@@ -111,7 +111,7 @@ func (h *DriverHandler) ListFiles(w http.ResponseWriter, r *http.Request) {
 			Path:     file.GetPath(),
 		})
 	}
-	
+
 	response := APIResponse{
 		Code:    200,
 		Message: "success",
@@ -120,21 +120,21 @@ func (h *DriverHandler) ListFiles(w http.ResponseWriter, r *http.Request) {
 			"total":   len(fileInfos),
 		},
 	}
-	
+
 	writeJSONResponse(w, response)
 }
 
 // GetFileLink 获取文件链接
 func (h *DriverHandler) GetFileLink(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	
+
 	// 获取路径参数
 	path := r.URL.Query().Get("path")
 	if path == "" {
 		writeErrorResponse(w, 400, "path parameter is required")
 		return
 	}
-	
+
 	// 构建链接参数
 	args := drivers.LinkArgs{
 		IP:      getClientIP(r),
@@ -142,57 +142,57 @@ func (h *DriverHandler) GetFileLink(w http.ResponseWriter, r *http.Request) {
 		Type:    r.URL.Query().Get("type"),
 		HttpReq: r,
 	}
-	
+
 	// 调用驱动服务
 	link, err := h.driverService.GetFileLink(ctx, path, args)
 	if err != nil {
 		writeErrorResponse(w, 500, fmt.Sprintf("failed to get file link: %v", err))
 		return
 	}
-	
+
 	// 如果有直接URL，重定向
 	if link.URL != "" {
 		http.Redirect(w, r, link.URL, http.StatusFound)
 		return
 	}
-	
+
 	// 如果有文件流，直接返回
 	if link.MFile != nil {
 		defer link.MFile.Close()
-		
+
 		// 设置响应头
 		for key, values := range link.Header {
 			for _, value := range values {
 				w.Header().Add(key, value)
 			}
 		}
-		
+
 		// 复制文件内容
 		http.ServeContent(w, r, "", time.Time{}, link.MFile)
 		return
 	}
-	
+
 	writeErrorResponse(w, 404, "file not found")
 }
 
 // GetFile 获取文件信息
 func (h *DriverHandler) GetFile(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	
+
 	// 获取路径参数
 	path := r.URL.Query().Get("path")
 	if path == "" {
 		writeErrorResponse(w, 400, "path parameter is required")
 		return
 	}
-	
+
 	// 调用驱动服务
 	file, err := h.driverService.GetFile(ctx, path)
 	if err != nil {
 		writeErrorResponse(w, 500, fmt.Sprintf("failed to get file: %v", err))
 		return
 	}
-	
+
 	// 构建响应
 	fileInfo := FileInfo{
 		Name:     file.GetName(),
@@ -201,66 +201,66 @@ func (h *DriverHandler) GetFile(w http.ResponseWriter, r *http.Request) {
 		Modified: file.ModTime().Unix(),
 		Path:     file.GetPath(),
 	}
-	
+
 	response := APIResponse{
 		Code:    200,
 		Message: "success",
 		Data:    fileInfo,
 	}
-	
+
 	writeJSONResponse(w, response)
 }
 
 // DownloadFile 下载文件
 func (h *DriverHandler) DownloadFile(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	
+
 	// 获取路径参数
 	path := r.URL.Query().Get("path")
 	if path == "" {
 		writeErrorResponse(w, 400, "path parameter is required")
 		return
 	}
-	
+
 	// 构建链接参数
 	args := drivers.LinkArgs{
 		IP:      getClientIP(r),
 		Header:  r.Header,
 		HttpReq: r,
 	}
-	
+
 	// 获取文件链接
 	link, err := h.driverService.GetFileLink(ctx, path, args)
 	if err != nil {
 		writeErrorResponse(w, 500, fmt.Sprintf("failed to get download link: %v", err))
 		return
 	}
-	
+
 	// 处理下载
 	if link.URL != "" {
 		// 重定向到下载URL
 		http.Redirect(w, r, link.URL, http.StatusFound)
 		return
 	}
-	
+
 	if link.MFile != nil {
 		defer link.MFile.Close()
-		
+
 		// 设置下载响应头
 		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", getFileName(path)))
-		
+
 		// 设置其他响应头
 		for key, values := range link.Header {
 			for _, value := range values {
 				w.Header().Add(key, value)
 			}
 		}
-		
+
 		// 复制文件内容
 		http.ServeContent(w, r, getFileName(path), time.Time{}, link.MFile)
 		return
 	}
-	
+
 	writeErrorResponse(w, 404, "file not found")
 }
 
@@ -280,7 +280,7 @@ func getClientIP(r *http.Request) string {
 	if ip != "" {
 		return ip
 	}
-	
+
 	ip = r.Header.Get("X-Forwarded-For")
 	if ip != "" {
 		// X-Forwarded-For可能包含多个IP，取第一个
@@ -289,17 +289,17 @@ func getClientIP(r *http.Request) string {
 		}
 		return strings.TrimSpace(ip)
 	}
-	
+
 	ip = r.Header.Get("X-Real-IP")
 	if ip != "" {
 		return ip
 	}
-	
+
 	// fallback到RemoteAddr
 	if colon := strings.LastIndex(r.RemoteAddr, ":"); colon != -1 {
 		return r.RemoteAddr[:colon]
 	}
-	
+
 	return r.RemoteAddr
 }
 
@@ -329,4 +329,5 @@ func writeErrorResponse(w http.ResponseWriter, code int, message string) {
 		Message: message,
 	}
 	writeJSONResponse(w, response)
-} 
+}
+

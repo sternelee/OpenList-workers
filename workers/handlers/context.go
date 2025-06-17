@@ -3,7 +3,7 @@ package handlers
 import (
 	"context"
 
-	"github.com/OpenListTeam/OpenList-workers/workers/models"
+	"github.com/sternelee/OpenList-workers/workers/models"
 )
 
 type contextKey string
@@ -21,4 +21,5 @@ func GetUserFromContext(ctx context.Context) *models.User {
 		return user
 	}
 	return nil
-} 
+}
+

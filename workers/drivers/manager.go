@@ -5,15 +5,15 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/OpenListTeam/OpenList-workers/workers/db"
-	"github.com/OpenListTeam/OpenList-workers/workers/models"
+	"github.com/sternelee/OpenList-workers/workers/db"
+	"github.com/sternelee/OpenList-workers/workers/models"
 )
 
 // DriverManager 驱动管理器
 type DriverManager struct {
-	mu       sync.RWMutex
-	drivers  map[string]Driver // mountPath -> driver
-	repos    *db.Repositories
+	mu      sync.RWMutex
+	drivers map[string]Driver // mountPath -> driver
+	repos   *db.Repositories
 }
 
 // NewDriverManager 创建驱动管理器
@@ -184,20 +184,20 @@ func matchPath(path, mountPath string) bool {
 	if mountPath == "/" {
 		return true
 	}
-	
+
 	if len(path) < len(mountPath) {
 		return false
 	}
-	
+
 	if path[:len(mountPath)] != mountPath {
 		return false
 	}
-	
+
 	// 确保是完整路径匹配
 	if len(path) == len(mountPath) {
 		return true
 	}
-	
+
 	return path[len(mountPath)] == '/'
 }
 
@@ -264,4 +264,5 @@ func (s *DriverService) GetFile(ctx context.Context, path string) (Obj, error) {
 	}
 
 	return nil, fmt.Errorf("driver does not support Get operation")
-} 
+}
+

@@ -7,14 +7,14 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/OpenListTeam/OpenList-workers/workers/auth"
-	"github.com/OpenListTeam/OpenList-workers/workers/db"
-	"github.com/OpenListTeam/OpenList-workers/workers/models"
+	"github.com/sternelee/OpenList-workers/workers/auth"
+	"github.com/sternelee/OpenList-workers/workers/db"
+	"github.com/sternelee/OpenList-workers/workers/models"
 )
 
 type AuthHandler struct {
-	db   *db.D1Client
-	jwt  *auth.JWTAuth
+	db  *db.D1Client
+	jwt *auth.JWTAuth
 }
 
 func NewAuthHandler(db *db.D1Client, jwt *auth.JWTAuth) *AuthHandler {
@@ -31,8 +31,8 @@ type LoginRequest struct {
 }
 
 type LoginResponse struct {
-	Token string           `json:"token"`
-	User  *UserResponse    `json:"user"`
+	Token string        `json:"token"`
+	User  *UserResponse `json:"user"`
 }
 
 type UserResponse struct {
@@ -214,4 +214,5 @@ func (h *AuthHandler) AdminOnlyMiddleware(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
-} 
+}
+

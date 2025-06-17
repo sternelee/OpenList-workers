@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"sync"
 
-	"github.com/OpenListTeam/OpenList-workers/workers/models"
+	"github.com/sternelee/OpenList-workers/workers/models"
 )
 
 // DriverConstructor 驱动构造函数类型
@@ -43,10 +43,10 @@ func (r *DriverRegistry) RegisterDriver(constructor DriverConstructor) {
 	// 创建临时驱动实例获取配置信息
 	tempDriver := constructor()
 	config := tempDriver.Config()
-	
+
 	// 注册驱动
 	r.drivers[config.Name] = constructor
-	
+
 	// 注册驱动信息
 	r.driverInfos[config.Name] = DriverInfo{
 		Config: config,
@@ -135,10 +135,10 @@ func (r *DriverRegistry) CreateDriver(storage *models.Storage) (Driver, error) {
 	}
 
 	driver := constructor()
-	
+
 	// 设置存储配置
 	driver.SetStorage(storage)
-	
+
 	return driver, nil
 }
 
@@ -161,7 +161,7 @@ func (r *DriverRegistry) parseDriverFields(addition interface{}) []DriverItem {
 	var items []DriverItem
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
-		
+
 		// 跳过内嵌字段
 		if field.Anonymous {
 			continue
@@ -221,4 +221,5 @@ type DriverItem struct {
 type DriverInfo struct {
 	Config DriverConfig `json:"config"`
 	Items  []DriverItem `json:"items"`
-} 
+}
+

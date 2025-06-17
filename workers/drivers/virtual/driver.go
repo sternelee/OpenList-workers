@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/OpenListTeam/OpenList-workers/workers/drivers"
+	"github.com/sternelee/OpenList-workers/workers/drivers"
 )
 
 // Virtual 虚拟驱动
@@ -138,4 +138,5 @@ func init() {
 	drivers.RegisterDriver(func() drivers.Driver {
 		return &Virtual{}
 	})
-} 
+}
+

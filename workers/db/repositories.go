@@ -27,8 +27,14 @@ type UserRepository interface {
 type StorageRepository interface {
 	Repository[models.Storage]
 	GetByMountPath(ctx context.Context, mountPath string) (*models.Storage, error)
+	GetByUserAndPath(ctx context.Context, userID int, mountPath string) (*models.Storage, error)
 	ListByDriver(ctx context.Context, driver string) ([]*models.Storage, error)
 	ListEnabled(ctx context.Context) ([]*models.Storage, error)
+	ListByUser(ctx context.Context, userID int, limit, offset int) ([]*models.Storage, error)
+	ListUserEnabled(ctx context.Context, userID int) ([]*models.Storage, error)
+	ListPublic(ctx context.Context) ([]*models.Storage, error)
+	CheckUserAccess(ctx context.Context, userID int, storageID int) (bool, error)
+	DeleteByUser(ctx context.Context, userID int) error
 }
 
 // SettingRepository 设置仓库接口

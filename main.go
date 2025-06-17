@@ -3,15 +3,16 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 
-	"github.com/OpenListTeam/OpenList-workers/workers/auth"
-	"github.com/OpenListTeam/OpenList-workers/workers/db"
-	"github.com/OpenListTeam/OpenList-workers/workers/drivers"
-	_ "github.com/OpenListTeam/OpenList-workers/workers/drivers/virtual" // 注册虚拟驱动
-	"github.com/OpenListTeam/OpenList-workers/workers/handlers"
-	"github.com/OpenListTeam/OpenList-workers/workers/routes"
+	"github.com/sternelee/OpenList-workers/workers/auth"
+	"github.com/sternelee/OpenList-workers/workers/db"
+	"github.com/sternelee/OpenList-workers/workers/drivers"
+	_ "github.com/sternelee/OpenList-workers/workers/drivers/virtual" // 注册虚拟驱动
+	"github.com/sternelee/OpenList-workers/workers/handlers"
+	"github.com/sternelee/OpenList-workers/workers/routes"
 	"github.com/syumai/workers"
 	"github.com/syumai/workers/cloudflare"
 )
@@ -48,7 +49,7 @@ func main() {
 	mux.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"message": "pong", "service": "openlist-workers", "drivers": ` + 
+		w.Write([]byte(`{"message": "pong", "service": "openlist-workers", "drivers": ` +
 			getDriverCountJSON(driverService) + `}`))
 	})
 
@@ -81,5 +82,6 @@ func corsMiddleware(next http.Handler) http.Handler {
 // Helper function to get driver count as JSON string
 func getDriverCountJSON(driverService *drivers.DriverService) string {
 	driverNames := drivers.GetDriverNames()
-	return `{"available": ` + string(rune(len(driverNames))) + `, "types": ["Virtual"]}`
+	count := len(driverNames)
+	return fmt.Sprintf(`{"available": %d, "types": ["Virtual"]}`, count)
 }

@@ -7,6 +7,7 @@ import (
 // Storage 存储配置模型
 type Storage struct {
 	ID              int       `json:"id" db:"id"`
+	UserID          int       `json:"user_id" db:"user_id"` // 所属用户ID
 	MountPath       string    `json:"mount_path" db:"mount_path" binding:"required"`
 	OrderIndex      int       `json:"order" db:"order_index"`
 	Driver          string    `json:"driver" db:"driver"`
@@ -18,6 +19,11 @@ type Storage struct {
 	Disabled        bool      `json:"disabled" db:"disabled"`
 	DisableIndex    bool      `json:"disable_index" db:"disable_index"`
 	EnableSign      bool      `json:"enable_sign" db:"enable_sign"`
+	
+	// Access control fields
+	IsPublic     bool `json:"is_public" db:"is_public"`         // 是否公开访问
+	AllowGuest   bool `json:"allow_guest" db:"allow_guest"`     // 是否允许访客访问
+	RequireAuth  bool `json:"require_auth" db:"require_auth"`   // 是否需要认证
 	
 	// Sort fields
 	OrderBy        string `json:"order_by" db:"order_by"`

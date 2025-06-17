@@ -19,15 +19,16 @@ func NewStorageRepository(db *sql.DB) StorageRepository {
 // Create 创建存储配置
 func (r *storageRepository) Create(ctx context.Context, storage *models.Storage) error {
 	query := `
-		INSERT INTO storages (mount_path, order_index, driver, cache_expiration, status, addition, remark, 
-		                     modified, disabled, disable_index, enable_sign, order_by, order_direction, 
-		                     extract_folder, web_proxy, webdav_policy, proxy_range, down_proxy_url)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO storages (user_id, mount_path, order_index, driver, cache_expiration, status, addition, remark, 
+		                     modified, disabled, disable_index, enable_sign, is_public, allow_guest, require_auth,
+		                     order_by, order_direction, extract_folder, web_proxy, webdav_policy, proxy_range, down_proxy_url)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 	result, err := r.db.ExecContext(ctx, query,
-		storage.MountPath, storage.OrderIndex, storage.Driver, storage.CacheExpiration,
+		storage.UserID, storage.MountPath, storage.OrderIndex, storage.Driver, storage.CacheExpiration,
 		storage.Status, storage.Addition, storage.Remark, storage.Modified,
 		storage.Disabled, storage.DisableIndex, storage.EnableSign,
+		storage.IsPublic, storage.AllowGuest, storage.RequireAuth,
 		storage.OrderBy, storage.OrderDirection, storage.ExtractFolder,
 		storage.WebProxy, storage.WebdavPolicy, storage.ProxyRange, storage.DownProxyUrl,
 	)
@@ -46,17 +47,18 @@ func (r *storageRepository) Create(ctx context.Context, storage *models.Storage)
 // GetByID 根据ID获取存储配置
 func (r *storageRepository) GetByID(ctx context.Context, id int) (*models.Storage, error) {
 	query := `
-		SELECT id, mount_path, order_index, driver, cache_expiration, status, addition, remark, 
-		       modified, disabled, disable_index, enable_sign, order_by, order_direction, 
-		       extract_folder, web_proxy, webdav_policy, proxy_range, down_proxy_url, 
+		SELECT id, user_id, mount_path, order_index, driver, cache_expiration, status, addition, remark, 
+		       modified, disabled, disable_index, enable_sign, is_public, allow_guest, require_auth,
+		       order_by, order_direction, extract_folder, web_proxy, webdav_policy, proxy_range, down_proxy_url, 
 		       created_at, updated_at
 		FROM storages WHERE id = ?
 	`
 	storage := &models.Storage{}
 	err := r.db.QueryRowContext(ctx, query, id).Scan(
-		&storage.ID, &storage.MountPath, &storage.OrderIndex, &storage.Driver,
+		&storage.ID, &storage.UserID, &storage.MountPath, &storage.OrderIndex, &storage.Driver,
 		&storage.CacheExpiration, &storage.Status, &storage.Addition, &storage.Remark,
 		&storage.Modified, &storage.Disabled, &storage.DisableIndex, &storage.EnableSign,
+		&storage.IsPublic, &storage.AllowGuest, &storage.RequireAuth,
 		&storage.OrderBy, &storage.OrderDirection, &storage.ExtractFolder,
 		&storage.WebProxy, &storage.WebdavPolicy, &storage.ProxyRange, &storage.DownProxyUrl,
 		&storage.CreatedAt, &storage.UpdatedAt,
@@ -70,17 +72,43 @@ func (r *storageRepository) GetByID(ctx context.Context, id int) (*models.Storag
 // GetByMountPath 根据挂载路径获取存储配置
 func (r *storageRepository) GetByMountPath(ctx context.Context, mountPath string) (*models.Storage, error) {
 	query := `
-		SELECT id, mount_path, order_index, driver, cache_expiration, status, addition, remark, 
-		       modified, disabled, disable_index, enable_sign, order_by, order_direction, 
-		       extract_folder, web_proxy, webdav_policy, proxy_range, down_proxy_url, 
+		SELECT id, user_id, mount_path, order_index, driver, cache_expiration, status, addition, remark, 
+		       modified, disabled, disable_index, enable_sign, is_public, allow_guest, require_auth,
+		       order_by, order_direction, extract_folder, web_proxy, webdav_policy, proxy_range, down_proxy_url, 
 		       created_at, updated_at
 		FROM storages WHERE mount_path = ?
 	`
 	storage := &models.Storage{}
 	err := r.db.QueryRowContext(ctx, query, mountPath).Scan(
-		&storage.ID, &storage.MountPath, &storage.OrderIndex, &storage.Driver,
+		&storage.ID, &storage.UserID, &storage.MountPath, &storage.OrderIndex, &storage.Driver,
 		&storage.CacheExpiration, &storage.Status, &storage.Addition, &storage.Remark,
 		&storage.Modified, &storage.Disabled, &storage.DisableIndex, &storage.EnableSign,
+		&storage.IsPublic, &storage.AllowGuest, &storage.RequireAuth,
+		&storage.OrderBy, &storage.OrderDirection, &storage.ExtractFolder,
+		&storage.WebProxy, &storage.WebdavPolicy, &storage.ProxyRange, &storage.DownProxyUrl,
+		&storage.CreatedAt, &storage.UpdatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return storage, nil
+}
+
+// GetByUserAndPath 根据用户ID和挂载路径获取存储配置
+func (r *storageRepository) GetByUserAndPath(ctx context.Context, userID int, mountPath string) (*models.Storage, error) {
+	query := `
+		SELECT id, user_id, mount_path, order_index, driver, cache_expiration, status, addition, remark, 
+		       modified, disabled, disable_index, enable_sign, is_public, allow_guest, require_auth,
+		       order_by, order_direction, extract_folder, web_proxy, webdav_policy, proxy_range, down_proxy_url, 
+		       created_at, updated_at
+		FROM storages WHERE user_id = ? AND mount_path = ?
+	`
+	storage := &models.Storage{}
+	err := r.db.QueryRowContext(ctx, query, userID, mountPath).Scan(
+		&storage.ID, &storage.UserID, &storage.MountPath, &storage.OrderIndex, &storage.Driver,
+		&storage.CacheExpiration, &storage.Status, &storage.Addition, &storage.Remark,
+		&storage.Modified, &storage.Disabled, &storage.DisableIndex, &storage.EnableSign,
+		&storage.IsPublic, &storage.AllowGuest, &storage.RequireAuth,
 		&storage.OrderBy, &storage.OrderDirection, &storage.ExtractFolder,
 		&storage.WebProxy, &storage.WebdavPolicy, &storage.ProxyRange, &storage.DownProxyUrl,
 		&storage.CreatedAt, &storage.UpdatedAt,

@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/OpenListTeam/OpenList-workers/workers/models"
+	"github.com/sternelee/OpenList-workers/workers/models"
 )
 
 // Driver 驱动主接口
@@ -17,7 +17,7 @@ type Driver interface {
 	GetAddition() interface{}
 	Init(ctx context.Context) error
 	Drop(ctx context.Context) error
-	
+
 	// 基础读取操作
 	List(ctx context.Context, dir Obj, args ListArgs) ([]Obj, error)
 	Link(ctx context.Context, file Obj, args LinkArgs) (*Link, error)
@@ -83,11 +83,11 @@ type FileStreamer interface {
 
 // Link 链接信息
 type Link struct {
-	URL     string      `json:"url"`
-	Header  http.Header `json:"header"`
-	MFile   io.ReadCloser `json:"-"`
-	Concurrency int     `json:"concurrency"`
-	PartSize    int     `json:"part_size"`
+	URL         string        `json:"url"`
+	Header      http.Header   `json:"header"`
+	MFile       io.ReadCloser `json:"-"`
+	Concurrency int           `json:"concurrency"`
+	PartSize    int           `json:"part_size"`
 }
 
 // ListArgs 列表参数
@@ -136,9 +136,9 @@ func (o *Object) CreateTime() time.Time {
 	}
 	return o.Ctime
 }
-func (o *Object) IsDir() bool      { return o.IsFolder }
-func (o *Object) GetID() string    { return o.ID }
-func (o *Object) GetPath() string  { return o.Path }
+func (o *Object) IsDir() bool     { return o.IsFolder }
+func (o *Object) GetID() string   { return o.ID }
+func (o *Object) GetPath() string { return o.Path }
 
 // BaseDriver 基础驱动实现
 type BaseDriver struct {
@@ -172,4 +172,5 @@ type RootID struct {
 
 func (r *RootID) GetRootID() string {
 	return r.RootFolderID
-} 
+}
+
