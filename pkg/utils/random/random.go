@@ -2,6 +2,7 @@ package random
 
 import (
 	"crypto/rand"
+	"encoding/hex"
 	"math/big"
 	mathRand "math/rand"
 	"time"
@@ -13,17 +14,18 @@ var Rand *mathRand.Rand
 
 const letterBytes = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 
-func String(n int) string {
-	b := make([]byte, n)
-	letterLen := big.NewInt(int64(len(letterBytes)))
-	for i := range b {
-		idx, err := rand.Int(rand.Reader, letterLen)
-		if err != nil {
-			panic(err)
+// String generates a random string of the specified length
+func String(length int) string {
+	bytes := make([]byte, length/2)
+	if _, err := rand.Read(bytes); err != nil {
+		// Fallback to a simple method if crypto/rand fails
+		fallbackBytes := make([]byte, length/2)
+		for i := range fallbackBytes {
+			fallbackBytes[i] = byte(i % 256)
 		}
-		b[i] = letterBytes[idx.Int64()]
+		return hex.EncodeToString(fallbackBytes)
 	}
-	return string(b)
+	return hex.EncodeToString(bytes)
 }
 
 func Token() string {

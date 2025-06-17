@@ -1,0 +1,14 @@
+name = "openlist-workers"
+main = "build/worker.mjs"
+compatibility_date = "2024-12-01"
+
+[build]
+command = "make build"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "openlist-db"
+database_id = "your-database-id-here"  # 需要在创建数据库后替换
+
+[vars]
+ENVIRONMENT = "production" 

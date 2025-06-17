@@ -1,0 +1,20 @@
+-- 路径元数据表
+CREATE TABLE IF NOT EXISTS metas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    path TEXT NOT NULL UNIQUE,
+    password TEXT DEFAULT '',
+    p_sub BOOLEAN DEFAULT FALSE,
+    write BOOLEAN DEFAULT FALSE,
+    w_sub BOOLEAN DEFAULT FALSE,
+    hide TEXT DEFAULT '',
+    h_sub BOOLEAN DEFAULT FALSE,
+    readme TEXT DEFAULT '',
+    r_sub BOOLEAN DEFAULT FALSE,
+    header TEXT DEFAULT '',
+    header_sub BOOLEAN DEFAULT FALSE,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 创建索引
+CREATE INDEX IF NOT EXISTS idx_metas_path ON metas(path); 
