@@ -37,6 +37,6 @@ func init() {
 				return nil, err
 			}
 		}
-		return &DB{}, nil
+		return &db{}, nil
 	})
 }

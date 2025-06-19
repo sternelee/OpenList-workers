@@ -148,6 +148,40 @@ func admin(g *gin.RouterGroup) {
 	setting.POST("/set_pikpak", handles.SetPikPak)
 	setting.POST("/set_thunder", handles.SetThunder)
 
+	// RSS management
+	rss := g.Group("/rss")
+	rss.GET("/folders", handles.ListRSSFolders)
+	rss.POST("/folders", handles.CreateRSSFolder)
+	rss.DELETE("/folders/:id", handles.DeleteRSSFolder)
+	rss.GET("/feeds", handles.ListRSSFeeds)
+	rss.POST("/feeds", handles.CreateRSSFeed)
+	rss.GET("/feeds/:id", handles.GetRSSFeed)
+	rss.PUT("/feeds/:id", handles.UpdateRSSFeed)
+	rss.DELETE("/feeds/:id", handles.DeleteRSSFeed)
+	rss.POST("/feeds/:id/refresh", handles.RefreshRSSFeed)
+	rss.GET("/articles", handles.ListRSSArticles)
+	rss.POST("/articles/:id/read", handles.MarkRSSArticleRead)
+	rss.POST("/articles/read-all", handles.MarkAllRSSArticlesRead)
+	rss.GET("/rules", handles.ListRSSAutoDownloadRules)
+	rss.POST("/rules", handles.CreateRSSAutoDownloadRule)
+	rss.PUT("/rules/:id", handles.UpdateRSSAutoDownloadRule)
+	rss.DELETE("/rules/:id", handles.DeleteRSSAutoDownloadRule)
+	rss.POST("/rules/:id/toggle", handles.ToggleRSSAutoDownloadRule)
+	rss.GET("/download-tools", handles.GetRSSDownloadTools)
+
+	// Search management
+	search := g.Group("/search")
+	search.GET("/plugins", handles.ListSearchPlugins)
+	search.POST("/plugins", handles.InstallSearchPlugin)
+	search.POST("/plugins/:name/enable", handles.EnableSearchPlugin)
+	search.POST("/plugins/:name/disable", handles.DisableSearchPlugin)
+	search.DELETE("/plugins/:name", handles.UninstallSearchPlugin)
+	search.POST("/", handles.SearchResources)
+	search.GET("/jobs/:job_id", handles.GetSearchJob)
+	search.GET("/results/:search_id", handles.GetSearchResults)
+	search.POST("/download", handles.DownloadSearchResult)
+	search.POST("/batch-download", handles.BatchDownloadSearchResults)
+
 	// retain /admin/task API to ensure compatibility with legacy automation scripts
 	_task(g.Group("/task"))
 

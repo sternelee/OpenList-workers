@@ -11,6 +11,6 @@ var config = searcher.Config{
 
 func init() {
 	searcher.RegisterSearcher(config, func() (searcher.Searcher, error) {
-		return &DB{}, nil
+		return &db{}, nil
 	})
 }
