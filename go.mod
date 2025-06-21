@@ -80,7 +80,10 @@ require (
 	gorm.io/gorm v1.25.11
 )
 
-require github.com/Azure/azure-sdk-for-go/sdk/internal v1.10.0 // indirect
+require (
+	github.com/Azure/azure-sdk-for-go/sdk/internal v1.10.0 // indirect
+	github.com/syumai/workers v0.30.2 // indirect
+)
 
 require (
 	github.com/STARRY-S/zip v0.2.1 // indirect

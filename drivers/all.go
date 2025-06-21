@@ -15,7 +15,8 @@ import (
 	_ "github.com/OpenListTeam/OpenList/drivers/aliyundrive"
 	_ "github.com/OpenListTeam/OpenList/drivers/aliyundrive_open"
 	_ "github.com/OpenListTeam/OpenList/drivers/aliyundrive_share"
-	_ "github.com/OpenListTeam/OpenList/drivers/azure_blob"
+
+	// _ "github.com/OpenListTeam/OpenList/drivers/azure_blob"
 	_ "github.com/OpenListTeam/OpenList/drivers/baidu_netdisk"
 	_ "github.com/OpenListTeam/OpenList/drivers/baidu_photo"
 	_ "github.com/OpenListTeam/OpenList/drivers/baidu_share"
@@ -34,7 +35,8 @@ import (
 	_ "github.com/OpenListTeam/OpenList/drivers/google_photo"
 	_ "github.com/OpenListTeam/OpenList/drivers/halalcloud"
 	_ "github.com/OpenListTeam/OpenList/drivers/ilanzou"
-	_ "github.com/OpenListTeam/OpenList/drivers/ipfs_api"
+
+	// _ "github.com/OpenListTeam/OpenList/drivers/ipfs_api"
 	_ "github.com/OpenListTeam/OpenList/drivers/kodbox"
 	_ "github.com/OpenListTeam/OpenList/drivers/lanzou"
 	_ "github.com/OpenListTeam/OpenList/drivers/lenovonas_share"
