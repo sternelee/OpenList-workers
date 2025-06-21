@@ -60,6 +60,34 @@ func (dm *D1DatabaseManager) CreateTables(ctx context.Context) error {
 			UNIQUE(user_id, name),
 			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 		)`,
+		`CREATE TABLE IF NOT EXISTS offline_download_configs (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id INTEGER NOT NULL,
+			tool_name TEXT NOT NULL,
+			config TEXT,
+			temp_dir_path TEXT,
+			enabled BOOLEAN NOT NULL DEFAULT TRUE,
+			created DATETIME DEFAULT CURRENT_TIMESTAMP,
+			modified DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(user_id, tool_name),
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+		)`,
+		`CREATE TABLE IF NOT EXISTS offline_download_tasks (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id INTEGER NOT NULL,
+			config_id INTEGER NOT NULL,
+			urls TEXT NOT NULL,
+			dst_path TEXT NOT NULL,
+			tool TEXT NOT NULL,
+			status TEXT NOT NULL DEFAULT 'pending',
+			progress INTEGER NOT NULL DEFAULT 0,
+			delete_policy TEXT,
+			error TEXT,
+			created DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+			FOREIGN KEY (config_id) REFERENCES driver_configs(id) ON DELETE CASCADE
+		)`,
 	}
 
 	// 执行 DDL 语句创建表

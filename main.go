@@ -7,7 +7,12 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
+
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 
 	"github.com/OpenListTeam/OpenList/drivers"
 	"github.com/OpenListTeam/OpenList/internal/driver"
@@ -16,6 +21,40 @@ import (
 	"github.com/OpenListTeam/OpenList/internal/stream"
 	"github.com/syumai/workers"
 )
+
+// JWT 配置
+const (
+	JWT_SECRET     = "openlist-workers-secret-key-2024"
+	JWT_EXPIRATION = 24 * time.Hour // 24小时过期
+)
+
+// JWT Claims 结构
+type JWTClaims struct {
+	UserID   uint   `json:"user_id"`
+	Username string `json:"username"`
+	Role     int    `json:"role"`
+	Exp      int64  `json:"exp"`
+	Iat      int64  `json:"iat"`
+}
+
+// 认证响应结构
+type AuthResponse struct {
+	Token string      `json:"token"`
+	User  *model.User `json:"user"`
+}
+
+// 用户注册请求结构
+type RegisterRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+	BasePath string `json:"base_path,omitempty"`
+}
+
+// 用户登录请求结构
+type LoginRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
 
 // API 响应结构
 type APIResponse struct {
@@ -45,6 +84,34 @@ func (p *PageRequest) Validate() {
 	}
 }
 
+// 离线下载配置结构
+type OfflineDownloadConfig struct {
+	ID          uint   `json:"id"`
+	UserID      uint   `json:"user_id"`       // 关联用户ID
+	ToolName    string `json:"tool_name"`     // 工具名称：aria2, qbittorrent, transmission, 115, pikpak, thunder
+	Config      string `json:"config"`        // JSON 格式的配置信息
+	TempDirPath string `json:"temp_dir_path"` // 临时目录路径（对于云盘类工具）
+	Enabled     bool   `json:"enabled"`       // 是否启用
+	Created     string `json:"created"`       // 创建时间
+	Modified    string `json:"modified"`      // 修改时间
+}
+
+// 离线下载任务结构
+type OfflineDownloadTask struct {
+	ID           uint   `json:"id"`
+	UserID       uint   `json:"user_id"`       // 关联用户ID
+	ConfigID     uint   `json:"config_id"`     // 驱动配置ID
+	URLs         string `json:"urls"`          // JSON 格式的URL列表
+	DstPath      string `json:"dst_path"`      // 目标路径
+	Tool         string `json:"tool"`          // 使用的工具
+	Status       string `json:"status"`        // 任务状态：pending, running, completed, failed
+	Progress     int    `json:"progress"`      // 进度百分比
+	DeletePolicy string `json:"delete_policy"` // 删除策略
+	Error        string `json:"error"`         // 错误信息
+	Created      string `json:"created"`       // 创建时间
+	Updated      string `json:"updated"`       // 更新时间
+}
+
 // 全局变量
 var (
 	dbManager *D1DatabaseManager // D1 数据库管理器
@@ -54,6 +121,10 @@ var (
 	driversMap = make(map[string]*DriverConfig)
 	// 用户驱动实例映射，用于缓存已初始化的驱动
 	userDriverInstances = make(map[string]driver.Driver)
+	// 离线下载配置映射，用于缓存
+	offlineDownloadConfigs = make(map[string]*OfflineDownloadConfig)
+	// 离线下载任务映射，用于缓存
+	offlineDownloadTasks = make(map[uint]*OfflineDownloadTask)
 )
 
 // 驱动配置结构（基于用户）
@@ -1197,17 +1268,301 @@ func parseJSON(r *http.Request, v interface{}) error {
 	return json.Unmarshal(body, v)
 }
 
-// 获取当前用户ID（简化版本，实际应用中需要从认证token中获取）
+// 获取当前用户ID（更新为使用JWT认证）
 func getCurrentUserID(r *http.Request) uint {
-	// 从查询参数获取用户ID（仅用于演示）
-	userIDStr := r.URL.Query().Get("user_id")
-	if userIDStr != "" {
-		if userID, err := strconv.ParseUint(userIDStr, 10, 32); err == nil {
-			return uint(userID)
+	claims, err := getCurrentAuthenticatedUser(r)
+	if err != nil {
+		// 认证失败，返回0表示未认证
+		return 0
+	}
+	return claims.UserID
+}
+
+// 用户认证相关 API 处理器
+
+// 用户注册处理器
+func handleUserRegister(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		respondJSON(w, APIResponse{
+			Code:    405,
+			Message: "Method not allowed",
+		})
+		return
+	}
+
+	var req RegisterRequest
+	if err := parseJSON(r, &req); err != nil {
+		respondJSON(w, APIResponse{
+			Code:    400,
+			Message: "Invalid JSON: " + err.Error(),
+		})
+		return
+	}
+
+	// 验证必需字段
+	if req.Username == "" || req.Password == "" {
+		respondJSON(w, APIResponse{
+			Code:    400,
+			Message: "Username and password are required",
+		})
+		return
+	}
+
+	// 检查用户名长度
+	if len(req.Username) < 3 || len(req.Username) > 50 {
+		respondJSON(w, APIResponse{
+			Code:    400,
+			Message: "Username must be between 3 and 50 characters",
+		})
+		return
+	}
+
+	// 检查密码强度
+	if len(req.Password) < 6 {
+		respondJSON(w, APIResponse{
+			Code:    400,
+			Message: "Password must be at least 6 characters",
+		})
+		return
+	}
+
+	// 检查用户名是否已存在
+	for _, user := range usersMap {
+		if user.Username == req.Username {
+			respondJSON(w, APIResponse{
+				Code:    409,
+				Message: "Username already exists",
+			})
+			return
 		}
 	}
-	// 默认返回管理员用户ID
-	return 1
+
+	// 创建新用户
+	newUser := model.User{
+		Username:   req.Username,
+		BasePath:   req.BasePath,
+		Role:       model.GENERAL, // 默认为普通用户
+		Disabled:   false,
+		Permission: 0,
+		Authn:      "[]",
+	}
+
+	if newUser.BasePath == "" {
+		newUser.BasePath = "/"
+	}
+
+	// 设置密码
+	newUser.SetPassword(req.Password)
+
+	// 保存用户
+	if err := createUser(r.Context(), newUser); err != nil {
+		respondJSON(w, APIResponse{
+			Code:    500,
+			Message: "Failed to create user: " + err.Error(),
+		})
+		return
+	}
+
+	// 更新内存中的用户映射
+	newUser.ID = uint(time.Now().Unix()) // 生成简单的ID
+	usersMap[newUser.ID] = &newUser
+
+	// 生成 JWT Token
+	token, err := generateJWTToken(&newUser)
+	if err != nil {
+		respondJSON(w, APIResponse{
+			Code:    500,
+			Message: "Failed to generate token: " + err.Error(),
+		})
+		return
+	}
+
+	// 清除密码信息
+	newUser.Password = ""
+	newUser.PwdHash = ""
+	newUser.Salt = ""
+
+	respondJSON(w, APIResponse{
+		Code:    200,
+		Message: "User registered successfully",
+		Data: AuthResponse{
+			Token: token,
+			User:  &newUser,
+		},
+	})
+}
+
+// 用户登录处理器
+func handleUserLogin(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		respondJSON(w, APIResponse{
+			Code:    405,
+			Message: "Method not allowed",
+		})
+		return
+	}
+
+	var req LoginRequest
+	if err := parseJSON(r, &req); err != nil {
+		respondJSON(w, APIResponse{
+			Code:    400,
+			Message: "Invalid JSON: " + err.Error(),
+		})
+		return
+	}
+
+	// 验证必需字段
+	if req.Username == "" || req.Password == "" {
+		respondJSON(w, APIResponse{
+			Code:    400,
+			Message: "Username and password are required",
+		})
+		return
+	}
+
+	// 查找用户
+	var user *model.User
+	for _, u := range usersMap {
+		if u.Username == req.Username {
+			user = u
+			break
+		}
+	}
+
+	if user == nil {
+		respondJSON(w, APIResponse{
+			Code:    401,
+			Message: "Invalid username or password",
+		})
+		return
+	}
+
+	// 检查用户是否被禁用
+	if user.Disabled {
+		respondJSON(w, APIResponse{
+			Code:    403,
+			Message: "User account is disabled",
+		})
+		return
+	}
+
+	// 验证密码
+	if err := user.ValidateRawPassword(req.Password); err != nil {
+		respondJSON(w, APIResponse{
+			Code:    401,
+			Message: "Invalid username or password",
+		})
+		return
+	}
+
+	// 生成 JWT Token
+	token, err := generateJWTToken(user)
+	if err != nil {
+		respondJSON(w, APIResponse{
+			Code:    500,
+			Message: "Failed to generate token: " + err.Error(),
+		})
+		return
+	}
+
+	// 清除敏感信息
+	userResponse := *user
+	userResponse.Password = ""
+	userResponse.PwdHash = ""
+	userResponse.Salt = ""
+	userResponse.OtpSecret = ""
+
+	respondJSON(w, APIResponse{
+		Code:    200,
+		Message: "Login successful",
+		Data: AuthResponse{
+			Token: token,
+			User:  &userResponse,
+		},
+	})
+}
+
+// 获取当前用户信息处理器
+func handleCurrentUser(w http.ResponseWriter, r *http.Request) {
+	claims, err := getCurrentAuthenticatedUser(r)
+	if err != nil {
+		respondJSON(w, APIResponse{
+			Code:    401,
+			Message: "Authentication required: " + err.Error(),
+		})
+		return
+	}
+
+	user, err := getUserById(claims.UserID)
+	if err != nil {
+		respondJSON(w, APIResponse{
+			Code:    404,
+			Message: "User not found: " + err.Error(),
+		})
+		return
+	}
+
+	// 清除敏感信息
+	userResponse := *user
+	userResponse.Password = ""
+	userResponse.PwdHash = ""
+	userResponse.Salt = ""
+	userResponse.OtpSecret = ""
+
+	respondJSON(w, APIResponse{
+		Code: 200,
+		Data: userResponse,
+	})
+}
+
+// 用户登出处理器（前端清除token即可）
+func handleUserLogout(w http.ResponseWriter, r *http.Request) {
+	respondJSON(w, APIResponse{
+		Code:    200,
+		Message: "Logout successful",
+		Data: map[string]interface{}{
+			"message": "Please remove the token from client side",
+		},
+	})
+}
+
+// 认证包装器 - 为需要认证的API添加认证检查
+func requireAuth(handler func(w http.ResponseWriter, r *http.Request)) func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		_, err := getCurrentAuthenticatedUser(r)
+		if err != nil {
+			respondJSON(w, APIResponse{
+				Code:    401,
+				Message: "Authentication required: " + err.Error(),
+			})
+			return
+		}
+		handler(w, r)
+	}
+}
+
+// 管理员权限包装器
+func requireAdmin(handler func(w http.ResponseWriter, r *http.Request)) func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		claims, err := getCurrentAuthenticatedUser(r)
+		if err != nil {
+			respondJSON(w, APIResponse{
+				Code:    401,
+				Message: "Authentication required: " + err.Error(),
+			})
+			return
+		}
+
+		if !checkUserPermission(claims, int(model.ADMIN)) {
+			respondJSON(w, APIResponse{
+				Code:    403,
+				Message: "Admin permission required",
+			})
+			return
+		}
+
+		handler(w, r)
+	}
 }
 
 // 驱动配置 API 处理器
@@ -1737,44 +2092,1008 @@ func handleDeleteUserAPI(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// 离线下载配置管理函数
+
+// 获取用户的离线下载配置列表
+func getUserOfflineDownloadConfigs(userID uint) ([]*OfflineDownloadConfig, error) {
+	if dbManager != nil {
+		return dbManager.GetUserOfflineDownloadConfigs(context.Background(), userID)
+	}
+
+	// 回退到内存操作
+	var configs []*OfflineDownloadConfig
+	for _, config := range offlineDownloadConfigs {
+		if config.UserID == userID {
+			configs = append(configs, config)
+		}
+	}
+	return configs, nil
+}
+
+// 根据用户ID和工具名称获取离线下载配置
+func getUserOfflineDownloadConfigByTool(userID uint, toolName string) (*OfflineDownloadConfig, error) {
+	key := fmt.Sprintf("%d_%s", userID, toolName)
+	if config, exists := offlineDownloadConfigs[key]; exists {
+		return config, nil
+	}
+	return nil, fmt.Errorf("offline download config not found: %s for user %d", toolName, userID)
+}
+
+// 创建用户离线下载配置
+func createUserOfflineDownloadConfig(ctx context.Context, userID uint, config OfflineDownloadConfig) error {
+	config.UserID = userID
+
+	if dbManager != nil {
+		return dbManager.CreateOfflineDownloadConfig(ctx, config)
+	}
+
+	// 回退到内存操作
+	config.ID = uint(time.Now().Unix())
+	config.Created = time.Now().Format(time.RFC3339)
+	config.Modified = time.Now().Format(time.RFC3339)
+
+	key := fmt.Sprintf("%d_%s", userID, config.ToolName)
+	offlineDownloadConfigs[key] = &config
+	fmt.Printf("Created offline download config: %s for user %d (memory mode)\n", config.ToolName, userID)
+	return nil
+}
+
+// 更新用户离线下载配置
+func updateUserOfflineDownloadConfig(ctx context.Context, userID uint, config OfflineDownloadConfig) error {
+	config.UserID = userID
+
+	if dbManager != nil {
+		return dbManager.UpdateOfflineDownloadConfig(ctx, config)
+	}
+
+	// 回退到内存操作
+	key := fmt.Sprintf("%d_%s", userID, config.ToolName)
+	if existing, exists := offlineDownloadConfigs[key]; exists {
+		config.ID = existing.ID
+		config.Created = existing.Created
+		config.Modified = time.Now().Format(time.RFC3339)
+		offlineDownloadConfigs[key] = &config
+		fmt.Printf("Updated offline download config: %s for user %d (memory mode)\n", config.ToolName, userID)
+		return nil
+	}
+	return fmt.Errorf("offline download config not found: %s for user %d", config.ToolName, userID)
+}
+
+// 删除用户离线下载配置
+func deleteUserOfflineDownloadConfig(ctx context.Context, userID uint, toolName string) error {
+	if dbManager != nil {
+		return dbManager.DeleteUserOfflineDownloadConfig(ctx, userID, toolName)
+	}
+
+	// 回退到内存操作
+	key := fmt.Sprintf("%d_%s", userID, toolName)
+	if _, exists := offlineDownloadConfigs[key]; exists {
+		delete(offlineDownloadConfigs, key)
+		fmt.Printf("Deleted offline download config: %s for user %d (memory mode)\n", toolName, userID)
+		return nil
+	}
+	return fmt.Errorf("offline download config not found: %s for user %d", toolName, userID)
+}
+
+// 离线下载任务管理函数
+
+// 获取用户的离线下载任务列表
+func getUserOfflineDownloadTasks(userID uint, page, perPage int) ([]*OfflineDownloadTask, int64, error) {
+	if dbManager != nil {
+		return dbManager.GetUserOfflineDownloadTasks(context.Background(), userID, page, perPage)
+	}
+
+	// 回退到内存操作
+	var tasks []*OfflineDownloadTask
+	for _, task := range offlineDownloadTasks {
+		if task.UserID == userID {
+			tasks = append(tasks, task)
+		}
+	}
+
+	// 简单排序（按创建时间倒序）
+	for i := 0; i < len(tasks)-1; i++ {
+		for j := i + 1; j < len(tasks); j++ {
+			if tasks[i].Created < tasks[j].Created {
+				tasks[i], tasks[j] = tasks[j], tasks[i]
+			}
+		}
+	}
+
+	start := (page - 1) * perPage
+	end := start + perPage
+	total := int64(len(tasks))
+
+	if start > len(tasks) {
+		return []*OfflineDownloadTask{}, total, nil
+	}
+	if end > len(tasks) {
+		end = len(tasks)
+	}
+
+	return tasks[start:end], total, nil
+}
+
+// 根据ID获取离线下载任务
+func getOfflineDownloadTaskById(userID, taskID uint) (*OfflineDownloadTask, error) {
+	if task, exists := offlineDownloadTasks[taskID]; exists && task.UserID == userID {
+		return task, nil
+	}
+	return nil, fmt.Errorf("offline download task not found: %d for user %d", taskID, userID)
+}
+
+// 创建离线下载任务
+func createOfflineDownloadTask(ctx context.Context, userID uint, task OfflineDownloadTask) error {
+	task.UserID = userID
+
+	if dbManager != nil {
+		return dbManager.CreateOfflineDownloadTask(ctx, task)
+	}
+
+	// 回退到内存操作
+	task.ID = uint(time.Now().Unix())
+	task.Status = "pending"
+	task.Progress = 0
+	task.Created = time.Now().Format(time.RFC3339)
+	task.Updated = time.Now().Format(time.RFC3339)
+
+	offlineDownloadTasks[task.ID] = &task
+	fmt.Printf("Created offline download task: %d for user %d (memory mode)\n", task.ID, userID)
+	return nil
+}
+
+// 更新离线下载任务状态
+func updateOfflineDownloadTaskStatus(ctx context.Context, userID, taskID uint, status string, progress int, errorMsg string) error {
+	if dbManager != nil {
+		return dbManager.UpdateOfflineDownloadTaskStatus(ctx, userID, taskID, status, progress, errorMsg)
+	}
+
+	// 回退到内存操作
+	if task, exists := offlineDownloadTasks[taskID]; exists && task.UserID == userID {
+		task.Status = status
+		task.Progress = progress
+		task.Error = errorMsg
+		task.Updated = time.Now().Format(time.RFC3339)
+		fmt.Printf("Updated offline download task: %d status to %s (memory mode)\n", taskID, status)
+		return nil
+	}
+	return fmt.Errorf("offline download task not found: %d for user %d", taskID, userID)
+}
+
+// 删除离线下载任务
+func deleteOfflineDownloadTask(ctx context.Context, userID, taskID uint) error {
+	if dbManager != nil {
+		return dbManager.DeleteOfflineDownloadTask(ctx, userID, taskID)
+	}
+
+	// 回退到内存操作
+	if task, exists := offlineDownloadTasks[taskID]; exists && task.UserID == userID {
+		delete(offlineDownloadTasks, taskID)
+		fmt.Printf("Deleted offline download task: %d for user %d (memory mode)\n", taskID, userID)
+		return nil
+	}
+	return fmt.Errorf("offline download task not found: %d for user %d", taskID, userID)
+}
+
+// 获取支持的离线下载工具列表
+func getSupportedOfflineDownloadTools() []string {
+	return []string{
+		"aria2",        // Aria2 下载器
+		"qbittorrent",  // qBittorrent 下载器
+		"transmission", // Transmission 下载器
+		"115",          // 115 云盘离线下载
+		"pikpak",       // PikPak 离线下载
+		"thunder",      // 迅雷离线下载
+	}
+}
+
+// 验证驱动是否支持离线下载
+func validateDriverForOfflineDownload(userID, configID uint, toolName string) error {
+	// 获取驱动配置
+	config, err := getDriverConfigById(configID)
+	if err != nil {
+		return fmt.Errorf("driver config not found: %w", err)
+	}
+
+	// 验证配置属于指定用户
+	if config.UserID != userID {
+		return fmt.Errorf("driver config %d does not belong to user %d", configID, userID)
+	}
+
+	// 验证驱动类型是否支持离线下载
+	switch toolName {
+	case "115":
+		if config.Name != "115" {
+			return fmt.Errorf("tool %s requires 115 driver, but got %s", toolName, config.Name)
+		}
+	case "pikpak":
+		if config.Name != "PikPak" {
+			return fmt.Errorf("tool %s requires PikPak driver, but got %s", toolName, config.Name)
+		}
+	case "thunder":
+		if config.Name != "Thunder" {
+			return fmt.Errorf("tool %s requires Thunder driver, but got %s", toolName, config.Name)
+		}
+	case "aria2", "qbittorrent", "transmission":
+		// 这些工具不依赖特定驱动，只需要目标路径存在即可
+		break
+	default:
+		return fmt.Errorf("unsupported offline download tool: %s", toolName)
+	}
+
+	return nil
+}
+
+// 离线下载配置 API 处理器
+
+// 获取支持的离线下载工具列表
+func handleOfflineDownloadTools(w http.ResponseWriter, r *http.Request) {
+	tools := getSupportedOfflineDownloadTools()
+	respondJSON(w, APIResponse{
+		Code: 200,
+		Data: tools,
+	})
+}
+
+// 获取用户的离线下载配置列表
+func handleUserOfflineDownloadConfigs(w http.ResponseWriter, r *http.Request) {
+	userID := getCurrentUserID(r)
+
+	configs, err := getUserOfflineDownloadConfigs(userID)
+	if err != nil {
+		respondJSON(w, APIResponse{
+			Code:    500,
+			Message: "Failed to get offline download configs: " + err.Error(),
+		})
+		return
+	}
+
+	respondJSON(w, APIResponse{
+		Code: 200,
+		Data: map[string]interface{}{
+			"configs": configs,
+			"user_id": userID,
+		},
+	})
+}
+
+// 配置 Aria2 下载器
+func handleSetAria2Config(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		respondJSON(w, APIResponse{
+			Code:    405,
+			Message: "Method not allowed",
+		})
+		return
+	}
+
+	userID := getCurrentUserID(r)
+
+	var req struct {
+		URI    string `json:"uri" form:"uri"`
+		Secret string `json:"secret" form:"secret"`
+	}
+
+	if err := parseJSON(r, &req); err != nil {
+		respondJSON(w, APIResponse{
+			Code:    400,
+			Message: "Invalid JSON: " + err.Error(),
+		})
+		return
+	}
+
+	config := OfflineDownloadConfig{
+		ToolName: "aria2",
+		Config:   fmt.Sprintf(`{"uri": "%s", "secret": "%s"}`, req.URI, req.Secret),
+		Enabled:  true,
+	}
+
+	if err := createUserOfflineDownloadConfig(r.Context(), userID, config); err != nil {
+		// 如果已存在则更新
+		if err := updateUserOfflineDownloadConfig(r.Context(), userID, config); err != nil {
+			respondJSON(w, APIResponse{
+				Code:    500,
+				Message: "Failed to configure Aria2: " + err.Error(),
+			})
+			return
+		}
+	}
+
+	respondJSON(w, APIResponse{
+		Code:    200,
+		Message: "Aria2 configured successfully",
+		Data: map[string]interface{}{
+			"tool": "aria2",
+			"uri":  req.URI,
+		},
+	})
+}
+
+// 配置 qBittorrent 下载器
+func handleSetQbittorrentConfig(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		respondJSON(w, APIResponse{
+			Code:    405,
+			Message: "Method not allowed",
+		})
+		return
+	}
+
+	userID := getCurrentUserID(r)
+
+	var req struct {
+		URL      string `json:"url" form:"url"`
+		Seedtime string `json:"seedtime" form:"seedtime"`
+	}
+
+	if err := parseJSON(r, &req); err != nil {
+		respondJSON(w, APIResponse{
+			Code:    400,
+			Message: "Invalid JSON: " + err.Error(),
+		})
+		return
+	}
+
+	config := OfflineDownloadConfig{
+		ToolName: "qbittorrent",
+		Config:   fmt.Sprintf(`{"url": "%s", "seedtime": "%s"}`, req.URL, req.Seedtime),
+		Enabled:  true,
+	}
+
+	if err := createUserOfflineDownloadConfig(r.Context(), userID, config); err != nil {
+		// 如果已存在则更新
+		if err := updateUserOfflineDownloadConfig(r.Context(), userID, config); err != nil {
+			respondJSON(w, APIResponse{
+				Code:    500,
+				Message: "Failed to configure qBittorrent: " + err.Error(),
+			})
+			return
+		}
+	}
+
+	respondJSON(w, APIResponse{
+		Code:    200,
+		Message: "qBittorrent configured successfully",
+	})
+}
+
+// 配置 Transmission 下载器
+func handleSetTransmissionConfig(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		respondJSON(w, APIResponse{
+			Code:    405,
+			Message: "Method not allowed",
+		})
+		return
+	}
+
+	userID := getCurrentUserID(r)
+
+	var req struct {
+		URI      string `json:"uri" form:"uri"`
+		Seedtime string `json:"seedtime" form:"seedtime"`
+	}
+
+	if err := parseJSON(r, &req); err != nil {
+		respondJSON(w, APIResponse{
+			Code:    400,
+			Message: "Invalid JSON: " + err.Error(),
+		})
+		return
+	}
+
+	config := OfflineDownloadConfig{
+		ToolName: "transmission",
+		Config:   fmt.Sprintf(`{"uri": "%s", "seedtime": "%s"}`, req.URI, req.Seedtime),
+		Enabled:  true,
+	}
+
+	if err := createUserOfflineDownloadConfig(r.Context(), userID, config); err != nil {
+		// 如果已存在则更新
+		if err := updateUserOfflineDownloadConfig(r.Context(), userID, config); err != nil {
+			respondJSON(w, APIResponse{
+				Code:    500,
+				Message: "Failed to configure Transmission: " + err.Error(),
+			})
+			return
+		}
+	}
+
+	respondJSON(w, APIResponse{
+		Code:    200,
+		Message: "Transmission configured successfully",
+	})
+}
+
+// 配置 115 云盘离线下载
+func handleSet115Config(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		respondJSON(w, APIResponse{
+			Code:    405,
+			Message: "Method not allowed",
+		})
+		return
+	}
+
+	userID := getCurrentUserID(r)
+
+	var req struct {
+		TempDirPath string `json:"temp_dir_path" form:"temp_dir_path"`
+		ConfigID    uint   `json:"config_id" form:"config_id"`
+	}
+
+	if err := parseJSON(r, &req); err != nil {
+		respondJSON(w, APIResponse{
+			Code:    400,
+			Message: "Invalid JSON: " + err.Error(),
+		})
+		return
+	}
+
+	// 验证驱动配置
+	if req.ConfigID > 0 {
+		if err := validateDriverForOfflineDownload(userID, req.ConfigID, "115"); err != nil {
+			respondJSON(w, APIResponse{
+				Code:    400,
+				Message: "Driver validation failed: " + err.Error(),
+			})
+			return
+		}
+	}
+
+	config := OfflineDownloadConfig{
+		ToolName:    "115",
+		Config:      `{}`,
+		TempDirPath: req.TempDirPath,
+		Enabled:     true,
+	}
+
+	if err := createUserOfflineDownloadConfig(r.Context(), userID, config); err != nil {
+		// 如果已存在则更新
+		if err := updateUserOfflineDownloadConfig(r.Context(), userID, config); err != nil {
+			respondJSON(w, APIResponse{
+				Code:    500,
+				Message: "Failed to configure 115: " + err.Error(),
+			})
+			return
+		}
+	}
+
+	respondJSON(w, APIResponse{
+		Code:    200,
+		Message: "115 Cloud configured successfully",
+	})
+}
+
+// 配置 PikPak 离线下载
+func handleSetPikPakConfig(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		respondJSON(w, APIResponse{
+			Code:    405,
+			Message: "Method not allowed",
+		})
+		return
+	}
+
+	userID := getCurrentUserID(r)
+
+	var req struct {
+		TempDirPath string `json:"temp_dir_path" form:"temp_dir_path"`
+		ConfigID    uint   `json:"config_id" form:"config_id"`
+	}
+
+	if err := parseJSON(r, &req); err != nil {
+		respondJSON(w, APIResponse{
+			Code:    400,
+			Message: "Invalid JSON: " + err.Error(),
+		})
+		return
+	}
+
+	// 验证驱动配置
+	if req.ConfigID > 0 {
+		if err := validateDriverForOfflineDownload(userID, req.ConfigID, "pikpak"); err != nil {
+			respondJSON(w, APIResponse{
+				Code:    400,
+				Message: "Driver validation failed: " + err.Error(),
+			})
+			return
+		}
+	}
+
+	config := OfflineDownloadConfig{
+		ToolName:    "pikpak",
+		Config:      `{}`,
+		TempDirPath: req.TempDirPath,
+		Enabled:     true,
+	}
+
+	if err := createUserOfflineDownloadConfig(r.Context(), userID, config); err != nil {
+		// 如果已存在则更新
+		if err := updateUserOfflineDownloadConfig(r.Context(), userID, config); err != nil {
+			respondJSON(w, APIResponse{
+				Code:    500,
+				Message: "Failed to configure PikPak: " + err.Error(),
+			})
+			return
+		}
+	}
+
+	respondJSON(w, APIResponse{
+		Code:    200,
+		Message: "PikPak configured successfully",
+	})
+}
+
+// 配置迅雷离线下载
+func handleSetThunderConfig(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		respondJSON(w, APIResponse{
+			Code:    405,
+			Message: "Method not allowed",
+		})
+		return
+	}
+
+	userID := getCurrentUserID(r)
+
+	var req struct {
+		TempDirPath string `json:"temp_dir_path" form:"temp_dir_path"`
+		ConfigID    uint   `json:"config_id" form:"config_id"`
+	}
+
+	if err := parseJSON(r, &req); err != nil {
+		respondJSON(w, APIResponse{
+			Code:    400,
+			Message: "Invalid JSON: " + err.Error(),
+		})
+		return
+	}
+
+	// 验证驱动配置
+	if req.ConfigID > 0 {
+		if err := validateDriverForOfflineDownload(userID, req.ConfigID, "thunder"); err != nil {
+			respondJSON(w, APIResponse{
+				Code:    400,
+				Message: "Driver validation failed: " + err.Error(),
+			})
+			return
+		}
+	}
+
+	config := OfflineDownloadConfig{
+		ToolName:    "thunder",
+		Config:      `{}`,
+		TempDirPath: req.TempDirPath,
+		Enabled:     true,
+	}
+
+	if err := createUserOfflineDownloadConfig(r.Context(), userID, config); err != nil {
+		// 如果已存在则更新
+		if err := updateUserOfflineDownloadConfig(r.Context(), userID, config); err != nil {
+			respondJSON(w, APIResponse{
+				Code:    500,
+				Message: "Failed to configure Thunder: " + err.Error(),
+			})
+			return
+		}
+	}
+
+	respondJSON(w, APIResponse{
+		Code:    200,
+		Message: "Thunder configured successfully",
+	})
+}
+
+// 离线下载任务 API 处理器
+
+// 获取用户的离线下载任务列表
+func handleUserOfflineDownloadTasks(w http.ResponseWriter, r *http.Request) {
+	userID := getCurrentUserID(r)
+
+	page := 1
+	perPage := 20
+
+	if pageStr := r.URL.Query().Get("page"); pageStr != "" {
+		if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {
+			page = p
+		}
+	}
+	if perPageStr := r.URL.Query().Get("per_page"); perPageStr != "" {
+		if p, err := strconv.Atoi(perPageStr); err == nil && p > 0 {
+			perPage = p
+		}
+	}
+
+	tasks, total, err := getUserOfflineDownloadTasks(userID, page, perPage)
+	if err != nil {
+		respondJSON(w, APIResponse{
+			Code:    500,
+			Message: "Failed to get offline download tasks: " + err.Error(),
+		})
+		return
+	}
+
+	respondJSON(w, APIResponse{
+		Code: 200,
+		Data: map[string]interface{}{
+			"tasks":    tasks,
+			"total":    total,
+			"page":     page,
+			"per_page": perPage,
+			"user_id":  userID,
+		},
+	})
+}
+
+// 添加离线下载任务
+func handleAddOfflineDownloadTask(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		respondJSON(w, APIResponse{
+			Code:    405,
+			Message: "Method not allowed",
+		})
+		return
+	}
+
+	userID := getCurrentUserID(r)
+
+	var req struct {
+		URLs         []string `json:"urls"`
+		ConfigID     uint     `json:"config_id"`
+		DstPath      string   `json:"dst_path"`
+		Tool         string   `json:"tool"`
+		DeletePolicy string   `json:"delete_policy"`
+	}
+
+	if err := parseJSON(r, &req); err != nil {
+		respondJSON(w, APIResponse{
+			Code:    400,
+			Message: "Invalid JSON: " + err.Error(),
+		})
+		return
+	}
+
+	if len(req.URLs) == 0 {
+		respondJSON(w, APIResponse{
+			Code:    400,
+			Message: "URLs are required",
+		})
+		return
+	}
+
+	if req.ConfigID == 0 {
+		respondJSON(w, APIResponse{
+			Code:    400,
+			Message: "config_id is required",
+		})
+		return
+	}
+
+	// 验证驱动配置
+	if err := validateDriverForOfflineDownload(userID, req.ConfigID, req.Tool); err != nil {
+		respondJSON(w, APIResponse{
+			Code:    400,
+			Message: "Driver validation failed: " + err.Error(),
+		})
+		return
+	}
+
+	// 序列化 URLs
+	urlsJSON, err := json.Marshal(req.URLs)
+	if err != nil {
+		respondJSON(w, APIResponse{
+			Code:    500,
+			Message: "Failed to serialize URLs: " + err.Error(),
+		})
+		return
+	}
+
+	task := OfflineDownloadTask{
+		ConfigID:     req.ConfigID,
+		URLs:         string(urlsJSON),
+		DstPath:      req.DstPath,
+		Tool:         req.Tool,
+		DeletePolicy: req.DeletePolicy,
+	}
+
+	if err := createOfflineDownloadTask(r.Context(), userID, task); err != nil {
+		respondJSON(w, APIResponse{
+			Code:    500,
+			Message: "Failed to create offline download task: " + err.Error(),
+		})
+		return
+	}
+
+	respondJSON(w, APIResponse{
+		Code:    200,
+		Message: "Offline download task created successfully",
+		Data: map[string]interface{}{
+			"urls_count": len(req.URLs),
+			"tool":       req.Tool,
+			"dst_path":   req.DstPath,
+		},
+	})
+}
+
+// 更新离线下载任务状态
+func handleUpdateOfflineDownloadTaskStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		respondJSON(w, APIResponse{
+			Code:    405,
+			Message: "Method not allowed",
+		})
+		return
+	}
+
+	userID := getCurrentUserID(r)
+
+	var req struct {
+		TaskID   uint   `json:"task_id" form:"task_id"`
+		Status   string `json:"status" form:"status"`
+		Progress int    `json:"progress" form:"progress"`
+		Error    string `json:"error" form:"error"`
+	}
+
+	if err := parseJSON(r, &req); err != nil {
+		respondJSON(w, APIResponse{
+			Code:    400,
+			Message: "Invalid JSON: " + err.Error(),
+		})
+		return
+	}
+
+	if req.TaskID == 0 {
+		respondJSON(w, APIResponse{
+			Code:    400,
+			Message: "task_id is required",
+		})
+		return
+	}
+
+	if err := updateOfflineDownloadTaskStatus(r.Context(), userID, req.TaskID, req.Status, req.Progress, req.Error); err != nil {
+		respondJSON(w, APIResponse{
+			Code:    500,
+			Message: "Failed to update task status: " + err.Error(),
+		})
+		return
+	}
+
+	respondJSON(w, APIResponse{
+		Code:    200,
+		Message: "Task status updated successfully",
+	})
+}
+
+// 删除离线下载任务
+func handleDeleteOfflineDownloadTask(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		respondJSON(w, APIResponse{
+			Code:    405,
+			Message: "Method not allowed",
+		})
+		return
+	}
+
+	userID := getCurrentUserID(r)
+	taskIDStr := r.URL.Query().Get("task_id")
+	taskID, err := strconv.ParseUint(taskIDStr, 10, 32)
+	if err != nil {
+		respondJSON(w, APIResponse{
+			Code:    400,
+			Message: "Invalid task_id",
+		})
+		return
+	}
+
+	if err := deleteOfflineDownloadTask(r.Context(), userID, uint(taskID)); err != nil {
+		respondJSON(w, APIResponse{
+			Code:    500,
+			Message: "Failed to delete task: " + err.Error(),
+		})
+		return
+	}
+
+	respondJSON(w, APIResponse{
+		Code:    200,
+		Message: "Task deleted successfully",
+	})
+}
+
+// JWT 辅助函数
+
+// 生成 JWT Token
+func generateJWTToken(user *model.User) (string, error) {
+	now := time.Now()
+	claims := JWTClaims{
+		UserID:   user.ID,
+		Username: user.Username,
+		Role:     user.Role,
+		Exp:      now.Add(JWT_EXPIRATION).Unix(),
+		Iat:      now.Unix(),
+	}
+
+	// 创建 JWT header
+	header := map[string]interface{}{
+		"alg": "HS256",
+		"typ": "JWT",
+	}
+
+	// 编码 header 和 payload
+	headerBytes, _ := json.Marshal(header)
+	payloadBytes, _ := json.Marshal(claims)
+
+	headerEncoded := base64.RawURLEncoding.EncodeToString(headerBytes)
+	payloadEncoded := base64.RawURLEncoding.EncodeToString(payloadBytes)
+
+	// 创建签名
+	message := headerEncoded + "." + payloadEncoded
+	signature := createHMACSignature(message, JWT_SECRET)
+
+	// 组装 JWT
+	token := message + "." + signature
+	return token, nil
+}
+
+// 创建 HMAC 签名
+func createHMACSignature(message, secret string) string {
+	h := hmac.New(sha256.New, []byte(secret))
+	h.Write([]byte(message))
+	return base64.RawURLEncoding.EncodeToString(h.Sum(nil))
+}
+
+// 验证 JWT Token
+func verifyJWTToken(tokenString string) (*JWTClaims, error) {
+	// 分割 token
+	parts := strings.Split(tokenString, ".")
+	if len(parts) != 3 {
+		return nil, fmt.Errorf("invalid token format")
+	}
+
+	headerEncoded, payloadEncoded, signatureEncoded := parts[0], parts[1], parts[2]
+
+	// 验证签名
+	message := headerEncoded + "." + payloadEncoded
+	expectedSignature := createHMACSignature(message, JWT_SECRET)
+
+	if expectedSignature != signatureEncoded {
+		return nil, fmt.Errorf("invalid token signature")
+	}
+
+	// 解码 payload
+	payloadBytes, err := base64.RawURLEncoding.DecodeString(payloadEncoded)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode payload: %w", err)
+	}
+
+	var claims JWTClaims
+	if err := json.Unmarshal(payloadBytes, &claims); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal claims: %w", err)
+	}
+
+	// 检查过期时间
+	if time.Now().Unix() > claims.Exp {
+		return nil, fmt.Errorf("token expired")
+	}
+
+	return &claims, nil
+}
+
+// 从请求头中提取 JWT Token
+func extractTokenFromRequest(r *http.Request) string {
+	// 从 Authorization header 中提取
+	authHeader := r.Header.Get("Authorization")
+	if authHeader != "" {
+		// Bearer <token> 格式
+		if strings.HasPrefix(authHeader, "Bearer ") {
+			return strings.TrimPrefix(authHeader, "Bearer ")
+		}
+		// 直接是 token
+		return authHeader
+	}
+
+	// 从查询参数中提取
+	token := r.URL.Query().Get("token")
+	if token != "" {
+		return token
+	}
+
+	return ""
+}
+
+// 认证中间件 - 验证用户登录状态
+func authenticateUser(r *http.Request) (*JWTClaims, error) {
+	token := extractTokenFromRequest(r)
+	if token == "" {
+		return nil, fmt.Errorf("no token provided")
+	}
+
+	claims, err := verifyJWTToken(token)
+	if err != nil {
+		return nil, fmt.Errorf("invalid token: %w", err)
+	}
+
+	return claims, nil
+}
+
+// 检查用户权限
+func checkUserPermission(claims *JWTClaims, requiredRole int) bool {
+	// ADMIN 角色可以访问所有内容
+	if claims.Role == int(model.ADMIN) {
+		return true
+	}
+
+	// 检查是否满足最低角色要求
+	return claims.Role >= requiredRole
+}
+
+// 获取当前认证用户信息
+func getCurrentAuthenticatedUser(r *http.Request) (*JWTClaims, error) {
+	return authenticateUser(r)
+}
+
 func main() {
 	// 初始化驱动系统
 	drivers.All()
 
 	// 设置路由
 
-	// 用户驱动配置管理路由
-	http.HandleFunc("/api/drivers", handleUserDriversAPI)
-	http.HandleFunc("/api/user/driver/list", handleUserDriversAPI)
-	http.HandleFunc("/api/user/driver/get", handleUserDriverAPI)
-	http.HandleFunc("/api/user/driver/create", handleUserDriversAPI)
-	http.HandleFunc("/api/user/driver/update", handleUserDriverAPI)
-	http.HandleFunc("/api/user/driver/delete", handleDeleteUserDriverAPI)
-	http.HandleFunc("/api/user/driver/enable", handleEnableUserDriverAPI)
-	http.HandleFunc("/api/user/driver/disable", handleDisableUserDriverAPI)
+	// 用户认证相关路由（无需认证）
+	http.HandleFunc("/api/auth/register", handleUserRegister)
+	http.HandleFunc("/api/auth/login", handleUserLogin)
+	http.HandleFunc("/api/auth/logout", handleUserLogout)
 
-	// 用户管理路由
-	http.HandleFunc("/api/admin/user/list", handleUsersAPI)
-	http.HandleFunc("/api/admin/user/get", handleUserAPI)
-	http.HandleFunc("/api/admin/user/create", handleUsersAPI)
-	http.HandleFunc("/api/admin/user/update", handleUserAPI)
-	http.HandleFunc("/api/admin/user/delete", handleDeleteUserAPI)
+	// 获取当前用户信息（需要认证）
+	http.HandleFunc("/api/auth/me", requireAuth(handleCurrentUser))
 
-	// 基于用户驱动配置的文件系统路由
-	http.HandleFunc("/api/fs/list", handleFileSystemList)
-	http.HandleFunc("/api/fs/get", handleFileSystemGet)
-	http.HandleFunc("/api/fs/dirs", handleFileSystemDirs)
-	http.HandleFunc("/api/fs/mkdir", handleFileSystemMkdir)
-	http.HandleFunc("/api/fs/rename", handleFileSystemRename)
-	http.HandleFunc("/api/fs/move", handleFileSystemMove)
-	http.HandleFunc("/api/fs/copy", handleFileSystemCopy)
-	http.HandleFunc("/api/fs/remove", handleFileSystemRemove)
-	http.HandleFunc("/api/fs/upload", handleFileSystemUpload)
+	// 用户驱动配置管理路由（需要认证）
+	http.HandleFunc("/api/drivers", requireAuth(handleUserDriversAPI))
+	http.HandleFunc("/api/user/driver/list", requireAuth(handleUserDriversAPI))
+	http.HandleFunc("/api/user/driver/get", requireAuth(handleUserDriverAPI))
+	http.HandleFunc("/api/user/driver/create", requireAuth(handleUserDriversAPI))
+	http.HandleFunc("/api/user/driver/update", requireAuth(handleUserDriverAPI))
+	http.HandleFunc("/api/user/driver/delete", requireAuth(handleDeleteUserDriverAPI))
+	http.HandleFunc("/api/user/driver/enable", requireAuth(handleEnableUserDriverAPI))
+	http.HandleFunc("/api/user/driver/disable", requireAuth(handleDisableUserDriverAPI))
 
-	// 文件下载路由
-	http.HandleFunc("/d/", handleFileSystemDownload)
+	// 用户管理路由（需要管理员权限）
+	http.HandleFunc("/api/admin/user/list", requireAdmin(handleUsersAPI))
+	http.HandleFunc("/api/admin/user/get", requireAdmin(handleUserAPI))
+	http.HandleFunc("/api/admin/user/create", requireAdmin(handleUsersAPI))
+	http.HandleFunc("/api/admin/user/update", requireAdmin(handleUserAPI))
+	http.HandleFunc("/api/admin/user/delete", requireAdmin(handleDeleteUserAPI))
 
-	// 健康检查
+	// 基于用户驱动配置的文件系统路由（需要认证）
+	http.HandleFunc("/api/fs/list", requireAuth(handleFileSystemList))
+	http.HandleFunc("/api/fs/get", requireAuth(handleFileSystemGet))
+	http.HandleFunc("/api/fs/dirs", requireAuth(handleFileSystemDirs))
+	http.HandleFunc("/api/fs/mkdir", requireAuth(handleFileSystemMkdir))
+	http.HandleFunc("/api/fs/rename", requireAuth(handleFileSystemRename))
+	http.HandleFunc("/api/fs/move", requireAuth(handleFileSystemMove))
+	http.HandleFunc("/api/fs/copy", requireAuth(handleFileSystemCopy))
+	http.HandleFunc("/api/fs/remove", requireAuth(handleFileSystemRemove))
+	http.HandleFunc("/api/fs/upload", requireAuth(handleFileSystemUpload))
+
+	// 文件下载路由（需要认证）
+	http.HandleFunc("/d/", requireAuth(handleFileSystemDownload))
+
+	// 离线下载相关路由（需要认证）
+	http.HandleFunc("/api/offline_download_tools", requireAuth(handleOfflineDownloadTools))
+	http.HandleFunc("/api/user/offline_download/configs", requireAuth(handleUserOfflineDownloadConfigs))
+	http.HandleFunc("/api/user/offline_download/tasks", requireAuth(handleUserOfflineDownloadTasks))
+	http.HandleFunc("/api/user/offline_download/add_task", requireAuth(handleAddOfflineDownloadTask))
+	http.HandleFunc("/api/user/offline_download/update_task", requireAuth(handleUpdateOfflineDownloadTaskStatus))
+	http.HandleFunc("/api/user/offline_download/delete_task", requireAuth(handleDeleteOfflineDownloadTask))
+
+	// 离线下载工具配置路由（需要认证）
+	http.HandleFunc("/api/admin/setting/set_aria2", requireAuth(handleSetAria2Config))
+	http.HandleFunc("/api/admin/setting/set_qbittorrent", requireAuth(handleSetQbittorrentConfig))
+	http.HandleFunc("/api/admin/setting/set_transmission", requireAuth(handleSetTransmissionConfig))
+	http.HandleFunc("/api/admin/setting/set_115", requireAuth(handleSet115Config))
+	http.HandleFunc("/api/admin/setting/set_pikpak", requireAuth(handleSetPikPakConfig))
+	http.HandleFunc("/api/admin/setting/set_thunder", requireAuth(handleSetThunderConfig))
+
+	// 健康检查（无需认证）
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		// 统计用户和驱动配置数量
 		totalDriverConfigs := 0
@@ -1786,21 +3105,29 @@ func main() {
 			}
 		}
 
+		// 统计离线下载配置和任务数量
+		totalOfflineConfigs := len(offlineDownloadConfigs)
+		totalOfflineTasks := len(offlineDownloadTasks)
+
 		respondJSON(w, APIResponse{
 			Code:    200,
 			Message: "OpenList Workers is running",
 			Data: map[string]interface{}{
-				"users_count":            len(usersMap),
-				"total_driver_configs":   totalDriverConfigs,
-				"enabled_driver_configs": enabledDriverConfigs,
-				"driver_instances":       len(userDriverInstances),
-				"timestamp":              time.Now().Unix(),
-				"version":                "workers-1.0.0-filesystem",
+				"users_count":              len(usersMap),
+				"total_driver_configs":     totalDriverConfigs,
+				"enabled_driver_configs":   enabledDriverConfigs,
+				"driver_instances":         len(userDriverInstances),
+				"offline_download_configs": totalOfflineConfigs,
+				"offline_download_tasks":   totalOfflineTasks,
+				"supported_offline_tools":  getSupportedOfflineDownloadTools(),
+				"timestamp":                time.Now().Unix(),
+				"version":                  "workers-1.0.0-auth",
+				"auth_enabled":             true,
 			},
 		})
 	})
 
-	// 初始化端点
+	// 初始化端点（无需认证）
 	http.HandleFunc("/init", func(w http.ResponseWriter, r *http.Request) {
 		// 初始化 D1 数据库
 		if err := initD1DatabaseWithManager("openlist-db"); err != nil {
@@ -1815,10 +3142,14 @@ func main() {
 			Code:    200,
 			Message: "System initialized successfully",
 			Data: map[string]interface{}{
-				"users_count":          len(usersMap),
-				"driver_configs_count": len(driversMap),
-				"database_tables":      2, // users, driver_configs
-				"filesystem_enabled":   true,
+				"users_count":              len(usersMap),
+				"driver_configs_count":     len(driversMap),
+				"database_tables":          4, // users, driver_configs, offline_download_configs, offline_download_tasks
+				"filesystem_enabled":       true,
+				"offline_download_enabled": true,
+				"auth_enabled":             true,
+				"supported_tools":          getSupportedOfflineDownloadTools(),
+				"message":                  "Please register or login to use the system",
 			},
 		})
 	})

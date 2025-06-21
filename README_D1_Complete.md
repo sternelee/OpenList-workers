@@ -1,15 +1,32 @@
 # OpenList Workers - 完整的云存储管理平台
 
-基于 Cloudflare Workers 和 D1 数据库的轻量级云存储管理系统，支持多用户、多存储驱动配置和完整的文件系统操作。
+基于 Cloudflare Workers 和 D1 数据库的轻量级云存储管理系统，支持多用户、多存储驱动配置、完整的文件系统操作、强大的离线下载功能和JWT认证系统。
 
 ## 🌟 主要特性
 
 ### 核心功能
+- **JWT 认证系统**: 完整的用户注册、登录、权限管理
 - **多用户支持**: 每个用户拥有独立的驱动配置和文件空间
 - **多驱动支持**: 支持本地存储、S3、阿里云盘、OneDrive、Google Drive 等
 - **完整文件系统**: 支持文件和目录的增删改查、上传下载等操作
+- **离线下载**: 支持 Aria2、qBittorrent、Transmission、115、PikPak、Thunder 等多种下载工具
 - **D1 数据库**: 持久化存储用户和驱动配置数据
 - **开发友好**: 支持开发和生产环境分离
+
+### 认证特性
+- **JWT Token 认证**: 基于 JWT 的无状态认证机制
+- **用户注册**: 自助注册功能，支持用户名和密码验证
+- **安全登录**: 密码哈希存储，登录状态管理
+- **权限控制**: 基于角色的访问控制（RBAC）
+- **多种Token传递**: 支持 Authorization 头和查询参数
+- **Token过期管理**: 24小时自动过期，安全可靠
+
+### 离线下载特性
+- **多工具支持**: Aria2、qBittorrent、Transmission、115 云盘、PikPak、迅雷
+- **任务管理**: 创建、查询、更新、删除离线下载任务
+- **进度跟踪**: 实时更新下载进度和状态
+- **云盘集成**: 支持 115、PikPak、Thunder 等云盘的离线下载功能
+- **用户隔离**: 每个用户的下载配置和任务完全独立
 
 ### 架构优势
 - **无服务器**: 基于 Cloudflare Workers，自动扩缩容
@@ -43,150 +60,149 @@ wrangler dev
 curl -X POST http://localhost:8787/init
 ```
 
+### 用户注册和登录
+```bash
+# 注册新用户
+curl -X POST http://localhost:8787/api/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "myuser",
+    "password": "mypassword",
+    "base_path": "/home/myuser"
+  }'
+
+# 用户登录
+curl -X POST http://localhost:8787/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "myuser",
+    "password": "mypassword"
+  }'
+```
+
 ## 📚 API 文档
 
-### 用户管理 API
+### 认证 API
+
+#### 用户注册
+```http
+POST /api/auth/register
+Content-Type: application/json
+
+{
+  "username": "myuser",
+  "password": "mypassword",
+  "base_path": "/home/myuser"
+}
+```
+
+**响应**:
+```json
+{
+  "code": 200,
+  "message": "User registered successfully",
+  "data": {
+    "token": "eyJhbGciOiJIUzI1NiIs...",
+    "user": {
+      "id": 1,
+      "username": "myuser",
+      "role": 0,
+      "base_path": "/home/myuser"
+    }
+  }
+}
+```
+
+#### 用户登录
+```http
+POST /api/auth/login
+Content-Type: application/json
+
+{
+  "username": "myuser",
+  "password": "mypassword"
+}
+```
+
+#### 获取当前用户信息
+```http
+GET /api/auth/me
+Authorization: Bearer <token>
+```
+
+#### 用户登出
+```http
+POST /api/auth/logout
+Authorization: Bearer <token>
+```
+
+### 用户管理 API（需要管理员权限）
 
 #### 获取用户列表
 ```http
 GET /api/admin/user/list?page=1&per_page=20
+Authorization: Bearer <admin_token>
 ```
 
 #### 创建用户
 ```http
 POST /api/admin/user/create
+Authorization: Bearer <admin_token>
 Content-Type: application/json
 
 {
-  "username": "testuser",
-  "password": "password123",
-  "role": 2,
-  "base_path": "/",
-  "permission": 0x30FF
-}
-```
-
-#### 更新用户
-```http
-POST /api/admin/user/update
-Content-Type: application/json
-
-{
-  "id": 1,
-  "username": "updateduser",
+  "username": "newuser",
   "password": "newpassword",
-  "disabled": false
+  "role": 0,
+  "base_path": "/home/newuser"
 }
 ```
 
-#### 删除用户
-```http
-POST /api/admin/user/delete?id=1
-```
+### 驱动配置 API（需要认证）
 
-### 驱动配置管理 API
-
-#### 获取用户驱动配置列表
+#### 获取用户驱动配置
 ```http
-GET /api/drivers?user_id=1&enabled=true
+GET /api/drivers
+Authorization: Bearer <token>
 ```
 
 #### 创建驱动配置
 ```http
 POST /api/user/driver/create
+Authorization: Bearer <token>
 Content-Type: application/json
 
 {
   "name": "MyS3",
-  "display_name": "我的 S3 存储",
-  "description": "私人 S3 存储配置",
-  "config": "{\"bucket\":\"my-bucket\",\"region\":\"us-east-1\",\"access_key_id\":\"xxx\",\"secret_access_key\":\"xxx\"}",
+  "display_name": "我的S3存储",
+  "description": "个人S3存储配置",
+  "config": "{\"bucket\": \"my-bucket\", \"region\": \"us-east-1\"}",
   "icon": "cloud",
-  "enabled": true,
-  "order": 1
-}
-```
-
-#### 更新驱动配置
-```http
-POST /api/user/driver/update
-Content-Type: application/json
-
-{
-  "id": 1,
-  "name": "MyS3",
-  "display_name": "更新的 S3 存储",
-  "config": "{\"bucket\":\"new-bucket\",\"region\":\"us-east-1\"}",
   "enabled": true
 }
 ```
 
-#### 删除驱动配置
-```http
-POST /api/user/driver/delete?id=1
-```
-
-#### 启用/禁用驱动配置
-```http
-POST /api/user/driver/enable?id=1
-POST /api/user/driver/disable?id=1
-```
-
-### 文件系统 API
+### 文件系统 API（需要认证）
 
 #### 列出文件和目录
 ```http
-GET /api/fs/list?user_id=1&config_id=1&path=/&page=1&per_page=20
-```
-
-#### 获取文件信息
-```http
-GET /api/fs/get?user_id=1&config_id=1&path=/file.txt
+GET /api/fs/list?path=/&page=1&per_page=20
+Authorization: Bearer <token>
 ```
 
 #### 创建目录
 ```http
 POST /api/fs/mkdir
+Authorization: Bearer <token>
 Content-Type: application/x-www-form-urlencoded
 
-user_id=1&config_id=1&path=/&dir_name=new_folder
-```
-
-#### 重命名文件/目录
-```http
-POST /api/fs/rename
-Content-Type: application/x-www-form-urlencoded
-
-user_id=1&config_id=1&path=/old_name.txt&new_name=new_name.txt
-```
-
-#### 移动文件/目录
-```http
-POST /api/fs/move
-Content-Type: application/x-www-form-urlencoded
-
-user_id=1&config_id=1&path=/source/file.txt&dst_path=/destination/
-```
-
-#### 复制文件/目录
-```http
-POST /api/fs/copy
-Content-Type: application/x-www-form-urlencoded
-
-user_id=1&config_id=1&path=/source/file.txt&dst_path=/destination/
-```
-
-#### 删除文件/目录
-```http
-POST /api/fs/remove
-Content-Type: application/x-www-form-urlencoded
-
-user_id=1&config_id=1&path=/file.txt
+path=/&dir_name=new_folder
 ```
 
 #### 上传文件
 ```http
-PUT /api/fs/upload?user_id=1&config_id=1&path=/folder&filename=upload.txt
+PUT /api/fs/upload?path=/&filename=test.txt
+Authorization: Bearer <token>
 Content-Type: application/octet-stream
 
 [文件内容]
@@ -194,7 +210,58 @@ Content-Type: application/octet-stream
 
 #### 下载文件
 ```http
-GET /d/?user_id=1&config_id=1&path=/file.txt
+GET /d/?path=/test.txt
+Authorization: Bearer <token>
+```
+
+### 离线下载 API（需要认证）
+
+#### 获取支持的下载工具
+```http
+GET /api/offline_download_tools
+Authorization: Bearer <token>
+```
+
+#### 获取用户离线下载配置
+```http
+GET /api/user/offline_download/configs
+Authorization: Bearer <token>
+```
+
+#### 配置 Aria2 下载器
+```http
+POST /api/admin/setting/set_aria2
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "uri": "http://localhost:6800/jsonrpc",
+  "secret": "my_secret_token"
+}
+```
+
+#### 添加离线下载任务
+```http
+POST /api/user/offline_download/add_task
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "urls": [
+    "http://example.com/file.zip",
+    "magnet:?xt=urn:btih:example123456789"
+  ],
+  "config_id": 1,
+  "dst_path": "/downloads",
+  "tool": "aria2",
+  "delete_policy": "keep"
+}
+```
+
+#### 获取离线下载任务列表
+```http
+GET /api/user/offline_download/tasks?page=1&per_page=20
+Authorization: Bearer <token>
 ```
 
 ### 系统 API
@@ -208,6 +275,41 @@ GET /health
 ```http
 POST /init
 ```
+
+## 🔐 认证机制
+
+### JWT Token 结构
+```json
+{
+  "user_id": 1,
+  "username": "myuser",
+  "role": 0,
+  "exp": 1703097600,
+  "iat": 1703011200
+}
+```
+
+### Token 传递方式
+
+1. **Authorization Header（推荐）**:
+   ```http
+   Authorization: Bearer <token>
+   ```
+
+2. **Authorization Header（简化）**:
+   ```http
+   Authorization: <token>
+   ```
+
+3. **查询参数**:
+   ```http
+   GET /api/auth/me?token=<token>
+   ```
+
+### 权限级别
+- **0 - GENERAL**: 普通用户，只能访问自己的资源
+- **1 - GUEST**: 访客用户（通常被禁用）
+- **2 - ADMIN**: 管理员用户，可以访问所有管理功能
 
 ## 🛠️ 配置说明
 
@@ -251,202 +353,218 @@ CREATE TABLE driver_configs (
 );
 ```
 
-### 驱动配置示例
-
-#### 本地存储
-```json
-{
-  "root_folder_path": "/data"
-}
+**offline_download_configs 表**:
+```sql
+CREATE TABLE offline_download_configs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    tool_name TEXT NOT NULL,
+    config TEXT,
+    temp_dir_path TEXT,
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    created TEXT,
+    modified TEXT,
+    UNIQUE(user_id, tool_name),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
 ```
 
-#### Amazon S3
-```json
-{
-  "bucket": "my-bucket",
-  "region": "us-east-1",
-  "access_key_id": "AKIAIOSFODNN7EXAMPLE",
-  "secret_access_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
-  "endpoint": "https://s3.amazonaws.com"
-}
+**offline_download_tasks 表**:
+```sql
+CREATE TABLE offline_download_tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    config_id INTEGER NOT NULL,
+    urls TEXT NOT NULL,
+    dst_path TEXT NOT NULL,
+    tool TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    progress INTEGER NOT NULL DEFAULT 0,
+    delete_policy TEXT,
+    error TEXT,
+    created TEXT,
+    updated TEXT,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (config_id) REFERENCES driver_configs(id) ON DELETE CASCADE
+);
 ```
 
-#### 阿里云盘
-```json
-{
-  "refresh_token": "your_refresh_token",
-  "root_folder_id": "root"
-}
-```
-
-#### OneDrive
-```json
-{
-  "client_id": "your_client_id",
-  "client_secret": "your_client_secret",
-  "redirect_uri": "http://localhost:8787/callback"
-}
-```
-
-#### Google Drive
-```json
-{
-  "client_id": "your_client_id",
-  "client_secret": "your_client_secret",
-  "redirect_uri": "http://localhost:8787/callback"
-}
+### JWT 配置
+```go
+const (
+    JWT_SECRET     = "openlist-workers-secret-key-2024"
+    JWT_EXPIRATION = 24 * time.Hour // 24小时过期
+)
 ```
 
 ## 🧪 测试
 
-### 运行测试脚本
+### 运行认证功能测试
 ```bash
-# 基础 API 测试
-chmod +x test_d1_api.sh
-./test_d1_api.sh
+./test_auth_api.sh
+```
 
-# 文件系统 API 测试
-chmod +x test_filesystem_api.sh
+### 运行离线下载功能测试
+```bash
+./test_offline_download_api.sh
+```
+
+### 运行文件系统功能测试
+```bash
 ./test_filesystem_api.sh
 ```
 
-### 测试覆盖范围
-- ✅ 用户管理 CRUD 操作
-- ✅ 驱动配置管理
-- ✅ 文件系统基本操作
-- ✅ 权限验证
-- ✅ 错误处理
-- ✅ 多用户隔离
+测试内容包括：
+- 用户注册和登录
+- JWT Token 验证
+- 权限控制测试
+- 文件系统操作
+- 离线下载功能
+- 错误处理测试
 
-## 🚢 部署
+## 🔒 安全性
 
-### Cloudflare Workers 部署
+### 认证安全
+- JWT Token 24小时自动过期
+- 密码使用 SHA256 哈希 + 盐值存储
+- 用户数据完全隔离
+- 基于角色的权限控制
 
-1. **配置 wrangler.toml**:
-```toml
-name = "openlist-workers"
-main = "main.go"
-compatibility_date = "2024-01-01"
+### 数据隔离
+- 用户级别的配置隔离
+- 任务权限验证
+- 驱动配置验证
 
-[[d1_databases]]
-binding = "DB"
-database_name = "openlist-db"
-database_id = "your-database-id"
-```
+### 错误处理
+- 参数验证
+- 权限检查
+- 异常捕获
+- 安全的错误信息返回
 
-2. **创建 D1 数据库**:
+## 📈 性能特点
+
+### 认证优化
+- JWT 无状态设计
+- 内存缓存用户信息
+- 快速权限验证
+
+### 内存优化
+- 驱动实例缓存
+- 配置缓存机制
+- 任务状态缓存
+
+### 并发支持
+- 多用户并发操作
+- 多任务并行处理
+- 无状态设计
+
+## 🚀 部署说明
+
+### 开发环境
+1. 启动开发服务器：`wrangler dev`
+2. 初始化系统：`curl -X POST http://localhost:8787/init`
+3. 注册用户：`curl -X POST http://localhost:8787/api/auth/register -H "Content-Type: application/json" -d '{"username":"admin","password":"admin123"}'`
+4. 运行测试脚本：`./test_auth_api.sh`
+
+### 生产环境
+1. 配置 D1 数据库
+2. 更新 JWT_SECRET 为安全的密钥
+3. 部署到 Cloudflare Workers
+4. 配置环境变量和权限
+
+### 安全建议
+1. 在生产环境中修改默认的 JWT_SECRET
+2. 设置适当的 CORS 策略
+3. 启用 HTTPS
+4. 定期更新用户密码
+5. 监控异常访问
+
+## 🔮 未来计划
+
+- [ ] OAuth2 第三方登录支持
+- [ ] 2FA 双因素认证
+- [ ] 用户权限细粒度控制
+- [ ] API 访问速率限制
+- [ ] 审计日志功能
+- [ ] 多租户支持
+- [ ] WebSocket 实时通信
+- [ ] 移动端适配
+
+## 💡 使用示例
+
+### 完整的用户流程示例
+
+1. **用户注册**:
 ```bash
-wrangler d1 create openlist-db
+curl -X POST http://localhost:8787/api/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"username":"alice","password":"alice123","base_path":"/home/alice"}'
 ```
 
-3. **执行数据库迁移**:
+2. **用户登录并获取Token**:
 ```bash
-wrangler d1 execute openlist-db --file=schema.sql
+TOKEN=$(curl -s -X POST http://localhost:8787/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"alice","password":"alice123"}' | jq -r '.data.token')
 ```
 
-4. **部署应用**:
+3. **配置云存储驱动**:
 ```bash
-wrangler deploy
+curl -X POST http://localhost:8787/api/user/driver/create \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "MyS3",
+    "display_name": "我的S3存储",
+    "config": "{\"bucket\":\"my-bucket\",\"region\":\"us-east-1\"}"
+  }'
 ```
 
-### 环境变量
-```toml
-[vars]
-ENVIRONMENT = "production"
-```
-
-## 🔒 安全特性
-
-### 用户隔离
-- 每个用户只能访问自己的驱动配置
-- 文件操作限制在用户配置的驱动范围内
-- 数据库层面的外键约束确保数据一致性
-
-### 权限控制
-- 管理员用户可以管理所有用户
-- 普通用户只能管理自己的配置
-- 支持角色基础的权限控制
-
-### 数据保护
-- 密码使用 salt + hash 存储
-- 敏感配置信息存储在 D1 数据库中
-- 支持 2FA 认证（预留接口）
-
-## 📊 性能特性
-
-### 缓存机制
-- 驱动实例缓存，避免重复初始化
-- 用户配置内存缓存
-- 智能缓存失效机制
-
-### 资源优化
-- 按需加载驱动
-- 连接池复用
-- 最小化内存使用
-
-## 🔧 开发指南
-
-### 项目结构
-```
-OpenList-workers/
-├── main.go                    # 主应用程序
-├── d1_database.go            # 生产环境数据库
-├── d1_database_dev.go        # 开发环境数据库
-├── test_d1_api.sh           # API 测试脚本
-├── test_filesystem_api.sh    # 文件系统测试脚本
-├── wrangler.toml            # Cloudflare Workers 配置
-├── README_D1_Complete.md    # 完整文档
-├── README_FileSystem.md     # 文件系统文档
-└── README_Workers.md        # Workers 文档
-```
-
-### 添加新驱动
-1. 在 `initDefaultData()` 中添加驱动配置
-2. 确保驱动名称与 OpenList 支持的驱动匹配
-3. 提供正确的配置 JSON 格式
-4. 测试驱动兼容性
-
-### 调试指南
+4. **使用文件系统功能**:
 ```bash
-# 查看日志
-wrangler tail
+# 列出文件
+curl -H "Authorization: Bearer $TOKEN" \
+  "http://localhost:8787/api/fs/list?path=/"
 
-# 本地调试
-wrangler dev --local
-
-# 数据库查询
-wrangler d1 execute openlist-db --command "SELECT * FROM users;"
+# 创建目录
+curl -X POST http://localhost:8787/api/fs/mkdir \
+  -H "Authorization: Bearer $TOKEN" \
+  -d "path=/&dir_name=documents"
 ```
 
-## 🤝 贡献指南
+5. **配置离线下载**:
+```bash
+# 配置Aria2
+curl -X POST http://localhost:8787/api/admin/setting/set_aria2 \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"uri":"http://localhost:6800/jsonrpc","secret":"mysecret"}'
 
-### 提交代码
-1. Fork 项目
-2. 创建特性分支
-3. 提交更改
-4. 创建 Pull Request
+# 添加下载任务
+curl -X POST http://localhost:8787/api/user/offline_download/add_task \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "urls":["http://example.com/file.zip"],
+    "config_id":1,
+    "dst_path":"/downloads",
+    "tool":"aria2"
+  }'
+```
 
-### 报告问题
-- 使用 GitHub Issues
-- 提供详细的错误信息和重现步骤
-- 包含环境信息
+## 📖 常见问题
 
-## 📄 许可证
+### Q: 如何重置用户密码？
+A: 目前需要管理员通过 `/api/admin/user/update` 接口重置。
 
-MIT License - 详见 LICENSE 文件
+### Q: Token 过期后如何处理？
+A: 用户需要重新登录获取新的 Token。
 
-## 🔗 相关链接
+### Q: 如何添加新的云存储驱动？
+A: 通过 `/api/user/driver/create` 接口添加新的驱动配置。
 
-- [Cloudflare Workers 文档](https://developers.cloudflare.com/workers/)
-- [D1 数据库文档](https://developers.cloudflare.com/d1/)
-- [OpenList 项目](https://github.com/OpenListTeam/OpenList)
+### Q: 支持哪些文件操作？
+A: 支持列表、创建目录、重命名、移动、复制、删除、上传、下载等操作。
 
-## 📞 支持
-
-- GitHub Issues: 技术问题和 bug 报告
-- Discussions: 使用问题和建议
-- Email: 商业支持和合作
-
----
-
-**OpenList Workers** - 让云存储管理变得简单高效！ 🚀
+### Q: 离线下载支持哪些协议？
+A: 支持 HTTP/HTTPS、FTP、BitTorrent/磁力链接等多种协议。
