@@ -10,6 +10,13 @@
   "build": {
     "command": "npm run build"
   },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "openlist-db",
+      "database_id": "6d9e524a-29e9-4ec0-a410-305d2dc51045"
+    }
+  ],
   "observability": {
     "enabled": true
   }

@@ -21,7 +21,7 @@ output/
 # Dependency directories (remove the comment below to include it)
 # vendor/
 /bin/*
-*.json
+# *.json
 /build
 /data/
 /tmp/
@@ -34,3 +34,4 @@ output/
 .VSCodeCounter
 
 node_modules/
+/.wrangler
