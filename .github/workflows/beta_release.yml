@@ -66,10 +66,10 @@ jobs:
             flags: ""
           - target: "linux-mips64le" # mips64le-compat-family
             hash: "md5-mips64le-glibc"
-            flags: "-tags=sqlite_cgo_compat -ldflags="
+            flags: ""
           - target: "linux-(mips|mips64|mipsle|loong64)-musl*" # musl-compat-family
             hash: "md5-linux-musl-mips"
-            flags: "-tags=sqlite_cgo_compat -ldflags="
+            flags: ""
           - target: "linux-!(arm*|mips|mips64|mipsle|loong64)-musl*" # musl-not-arm (exclude compat-family)
             hash: "md5-linux-musl"
             flags: ""
@@ -81,7 +81,7 @@ jobs:
             flags: ""
           - target: "windows7-*" #win7
             hash: "md5-windows7"
-            flags: "-tags=sqlite_cgo_compat -ldflags="
+            flags: ""
           - target: "android-*" #android
             hash: "md5-android"
             flags: ""
@@ -113,7 +113,7 @@ jobs:
           echo "matrix.target=${{ matrix.target }}"
           echo "matrix.flags=${{ matrix.flags }}"
           echo "resolved action flags=${{ matrix.flags || '-ldflags=' }}"
-          echo "GOFLAGS=${GOFLAGS:-<empty>}"
+          echo "resolved GOFLAGS=${{ contains(matrix.target, 'windows7') && '-tags=sqlite_cgo_compat' || '' }}"
 
       - name: Build
         uses: OpenListTeam/cgo-actions@v1.2.2
@@ -131,6 +131,8 @@ jobs:
             github.com/OpenListTeam/OpenList/v4/internal/conf.GitCommit=$git_commit
             github.com/OpenListTeam/OpenList/v4/internal/conf.Version=$tag
             github.com/OpenListTeam/OpenList/v4/internal/conf.WebVersion=rolling
+        env:
+          GOFLAGS: ${{ contains(matrix.target, 'windows7') && '-tags=sqlite_cgo_compat' || '' }}
 
       - name: Compress
         run: |
